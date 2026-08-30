@@ -1,0 +1,281 @@
+# Gap between windows and the output's top/bottom edge
+vertical_gap = 9
+# Gap between adjacent windows
+horizontal_gap = 9
+# Default proportion of the output's available width for a new window
+default_window_width = 0.5
+
+# Center the focused window (never, always, single)
+center_focused_window = "never"
+
+# Disable client side decorations
+no_csd = true
+
+[border]
+width = 3
+focused_color = { r = 141, g = 214, b = 0, a = 1.0 }
+unfocused_color = { r = 160, g = 160, b = 160, a = 1.0 }
+
+# Theme and size of the cursor (omit to use the default cursor)
+# [cursor]
+# theme = "Adwaita"
+# size = 24
+
+# Commands run detached at startup. Each entry is one command + args.
+# spawn_at_startup = [["awww-daemon"], ["wl-clip-persist", "--clipboard", "both"]]
+
+# Rules matching windows by exact app_id and/or glob title (`*`, `?`).
+# All set fields must match. Matched windows are forced floating.
+# [[window_rules]]
+# app_id = "footclient"
+# floating = true
+# [[window_rules]]
+# title = "Picture-in-Picture"
+# floating = true
+
+# Key: keysym names (case insensitive) from xkbcommon-keysyms.h
+# Modifiers: shift, ctrl, mod1 (alt), mod3, mod4 (super), mod5
+# Actions: see README. Omitting keybindings entirely falls back to
+# the built-in defaults below.
+
+[[keybindings]]
+key = "q"
+modifiers = ["mod4"]
+action = "close_window"
+
+[[keybindings]]
+key = "f"
+modifiers = ["mod4"]
+action = "toggle_fullscreen"
+
+[[keybindings]]
+key = "minus"
+modifiers = ["mod4"]
+action = { adjust_window_width = -0.1 }
+
+[[keybindings]]
+key = "equal"
+modifiers = ["mod4"]
+action = { adjust_window_width = 0.1 }
+
+[[keybindings]]
+key = "BackSpace"
+modifiers = ["mod4"]
+action = { set_window_width = 0.5 }
+
+[[keybindings]]
+key = "minus"
+modifiers = ["mod4", "ctrl"]
+action = { adjust_floating_window_size = -0.1 }
+
+[[keybindings]]
+key = "equal"
+modifiers = ["mod4", "ctrl"]
+action = { adjust_floating_window_size = 0.1 }
+
+[[keybindings]]
+key = "BackSpace"
+modifiers = ["mod4", "ctrl"]
+action = { set_floating_window_height = 0.5 }
+
+[[keybindings]]
+key = "Left"
+modifiers = ["mod4"]
+action = "focus_window_left"
+
+[[keybindings]]
+key = "Right"
+modifiers = ["mod4"]
+action = "focus_window_right"
+
+[[keybindings]]
+key = "Left"
+modifiers = ["mod4", "shift"]
+action = "move_window_left"
+
+[[keybindings]]
+key = "Right"
+modifiers = ["mod4", "shift"]
+action = "move_window_right"
+
+[[keybindings]]
+key = "Left"
+modifiers = ["mod4", "ctrl"]
+action = "move_floating_window_left"
+
+[[keybindings]]
+key = "Right"
+modifiers = ["mod4", "ctrl"]
+action = "move_floating_window_right"
+
+[[keybindings]]
+key = "Up"
+modifiers = ["mod4", "ctrl"]
+action = "move_floating_window_up"
+
+[[keybindings]]
+key = "Down"
+modifiers = ["mod4", "ctrl"]
+action = "move_floating_window_down"
+
+[[keybindings]]
+key = "v"
+modifiers = ["mod4"]
+action = "toggle_workspace_floating"
+
+[[keybindings]]
+key = "Up"
+modifiers = ["mod4"]
+action = "focus_workspace_above"
+
+[[keybindings]]
+key = "Down"
+modifiers = ["mod4"]
+action = "focus_workspace_below"
+
+[[keybindings]]
+key = "grave"
+modifiers = ["mod4"]
+action = "focus_workspace_previous"
+
+# Workspace 1-10 (key "0" = workspace 10)
+[[keybindings]]
+key = "1"
+modifiers = ["mod4"]
+action = { focus_workspace_number = 1 }
+
+[[keybindings]]
+key = "Up"
+modifiers = ["mod4", "shift"]
+action = "move_window_to_workspace_above"
+
+[[keybindings]]
+key = "Down"
+modifiers = ["mod4", "shift"]
+action = "move_window_to_workspace_below"
+
+[[keybindings]]
+key = "1"
+modifiers = ["mod4", "shift"]
+action = { move_window_to_workspace_number = 1 }
+
+[[keybindings]]
+key = "h"
+modifiers = ["mod4"]
+action = "focus_output_left"
+
+[[keybindings]]
+key = "l"
+modifiers = ["mod4"]
+action = "focus_output_right"
+
+[[keybindings]]
+key = "k"
+modifiers = ["mod4"]
+action = "focus_output_above"
+
+[[keybindings]]
+key = "j"
+modifiers = ["mod4"]
+action = "focus_output_below"
+
+[[keybindings]]
+key = "h"
+modifiers = ["mod4", "shift"]
+action = "move_window_to_output_left"
+
+[[keybindings]]
+key = "l"
+modifiers = ["mod4", "shift"]
+action = "move_window_to_output_right"
+
+[[keybindings]]
+key = "k"
+modifiers = ["mod4", "shift"]
+action = "move_window_to_output_above"
+
+[[keybindings]]
+key = "j"
+modifiers = ["mod4", "shift"]
+action = "move_window_to_output_below"
+
+[[keybindings]]
+key = "Escape"
+modifiers = ["mod4"]
+action = "exit"
+
+# Bare keys: only active while the overview is open
+[[keybindings]]
+key = "Escape"
+modifiers = []
+action = "overview_cancel"
+
+[[keybindings]]
+key = "Return"
+modifiers = []
+action = "overview_confirm"
+
+[[keybindings]]
+key = "h"
+modifiers = []
+action = "overview_nav_left"
+
+[[keybindings]]
+key = "j"
+modifiers = []
+action = "overview_nav_down"
+
+[[keybindings]]
+key = "k"
+modifiers = []
+action = "overview_nav_up"
+
+[[keybindings]]
+key = "l"
+modifiers = []
+action = "overview_nav_right"
+
+[[keybindings]]
+key = "r"
+modifiers = ["mod4"]
+action = "reload_config"
+
+[[keybindings]]
+key = "t"
+modifiers = ["mod4"]
+action = { spawn = ["alacritty"] }
+
+[[keybindings]]
+key = "Space"
+modifiers = ["mod4"]
+action = "enter_overview"
+
+[[keybindings]]
+key = "XF86AudioRaiseVolume"
+modifiers = []
+action = { spawn = ["wpctl", "set-volume", "@DEFAULT_AUDIO_SINK@", "0.05+", "--limit", "1.0"] }
+
+[[keybindings]]
+key = "XF86AudioLowerVolume"
+modifiers = []
+action = { spawn = ["wpctl", "set-volume", "@DEFAULT_AUDIO_SINK@", "0.05-"] }
+
+[[keybindings]]
+key = "XF86AudioMute"
+modifiers = []
+action = { spawn = ["wpctl", "set-mute", "@DEFAULT_AUDIO_SINK@", "toggle"] }
+
+[[keybindings]]
+key = "XF86AudioMicMute"
+modifiers = []
+action = { spawn = ["wpctl", "set-mute", "@DEFAULT_AUDIO_SOURCE@", "toggle"] }
+
+[[pointer_bindings]]
+button = "left"
+modifiers = ["mod4"]
+action = "move_window"
+
+[[pointer_bindings]]
+button = "right"
+modifiers = ["mod4"]
+action = "resize_window"

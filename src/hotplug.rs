@@ -1,0 +1,785 @@
+// SPDX-FileCopyrightText: © 2026 Julian Andrews
+// SPDX-License-Identifier: 0BSD
+
+//! In-process compositor harness: replays real river output hotplug event
+//! streams over a socketpair against the actual dispatch code, so removal /
+//! re-add sequences run the true `output_event` -> `layout::apply` manage
+//! cycle. A panic or index-out-of-bounds here is the crash users hit on
+//! HDMI unplug: the test fails instead.
+
+use std::ffi::CString;
+use std::os::fd::{OwnedFd, RawFd};
+use std::os::unix::net::UnixStream;
+use std::sync::{Arc, Mutex};
+
+use wayland_backend::protocol::{Argument, Message};
+use wayland_backend::rs::client::Backend as ClientBackend;
+use wayland_backend::rs::server::Backend as ServerBackend;
+use wayland_backend::server::{
+    ClientData, ClientId, GlobalHandler, GlobalId, ObjectData, ObjectId,
+};
+
+use wayland_client::{Connection, EventQueue, QueueHandle};
+
+use crate::app::AppData;
+use crate::wm::WindowManager;
+use crate::{config, layout};
+
+// Regenerate the interface descriptors locally: river.rs generates them in a
+// private module, so the harness gets its own copies (wire format is defined
+// by interface NAME, so separate statics are fine). Nested like river.rs so
+// cross-XML references (river_output_v1 -> wl_surface etc.) resolve.
+mod ifaces {
+    pub mod rwm {
+        pub use wayland_client::protocol::__interfaces::*;
+        wayland_scanner::generate_interfaces!("./protocol/river-window-management-v1.xml");
+    }
+    pub mod rxkb {
+        use super::rwm::*;
+        wayland_scanner::generate_interfaces!("./protocol/river-xkb-bindings-v1.xml");
+    }
+    pub mod rls {
+        use super::rwm::*;
+        wayland_scanner::generate_interfaces!("./protocol/river-layer-shell-v1.xml");
+    }
+}
+use ifaces::rls::*;
+use ifaces::rwm::*;
+use ifaces::rxkb::*;
+
+// ---------------------------------------------------------------------------
+// Event opcodes (declaration order in the protocol XMLs; the client's
+// Dispatch impls are generated from the same files).
+// ---------------------------------------------------------------------------
+
+// river_window_manager_v1 events
+const EVT_MANAGE_START: u16 = 2;
+const EVT_WINDOW: u16 = 6;
+const EVT_OUTPUT: u16 = 7;
+const EVT_SEAT: u16 = 8;
+// river_output_v1 events
+const EVT_OUT_REMOVED: u16 = 0;
+const EVT_OUT_WL_OUTPUT: u16 = 1;
+const EVT_OUT_POSITION: u16 = 2;
+const EVT_OUT_DIMENSIONS: u16 = 3;
+// river_window_v1 events
+const EVT_WIN_DIMENSIONS: u16 = 2;
+// river_layer_shell_output_v1 events
+const EVT_LSO_NON_EXCLUSIVE_AREA: u16 = 0;
+
+// wl_output events (geometry=0, mode=1, done=2, scale=3)
+const EVT_WL_OUTPUT_NAME: u16 = 4;
+
+/// Generic no-op server object: tolerates every request flume makes, and
+/// returns fresh `Obj` data for children it creates via `new_id` requests.
+/// Records every `new_id` child it spawns so tests can send events on them
+/// (e.g. `non_exclusive_area` on layer-shell outputs).
+#[derive(Default)]
+struct Obj {
+    children: Option<Arc<Mutex<Vec<ObjectId>>>>,
+}
+
+impl ObjectData<()> for Obj {
+    fn request(
+        self: Arc<Self>,
+        _handle: &wayland_backend::server::Handle,
+        _data: &mut (),
+        _client_id: ClientId,
+        msg: Message<ObjectId, OwnedFd>,
+    ) -> Option<Arc<dyn ObjectData<()>>> {
+        let mut has_new_id = false;
+        for a in &msg.args {
+            if let Argument::NewId(id) = a {
+                has_new_id = true;
+                if let Some(children) = &self.children {
+                    children.lock().unwrap().push(id.clone());
+                }
+            }
+        }
+        if has_new_id {
+            Some(Arc::new(Obj {
+                children: self.children.clone(),
+            }))
+        } else {
+            None
+        }
+    }
+
+    fn destroyed(
+        self: Arc<Self>,
+        _handle: &wayland_backend::server::Handle,
+        _data: &mut (),
+        _client_id: ClientId,
+        _object_id: ObjectId,
+    ) {
+    }
+}
+
+#[derive(Default)]
+struct Client;
+
+impl ClientData for Client {}
+
+/// Records every global bind: `(label, client object id)`, in order.
+#[derive(Clone, Default)]
+struct BindLog(Arc<Mutex<Vec<(&'static str, ObjectId)>>>);
+
+struct GenericGlobal {
+    log: BindLog,
+    label: &'static str,
+    children: Arc<Mutex<Vec<ObjectId>>>,
+}
+
+impl GenericGlobal {
+    fn labeled(
+        log: BindLog,
+        label: &'static str,
+        children: Arc<Mutex<Vec<ObjectId>>>,
+    ) -> Arc<dyn GlobalHandler<()>> {
+        Arc::new(GenericGlobal {
+            log,
+            label,
+            children,
+        })
+    }
+}
+
+impl GlobalHandler<()> for GenericGlobal {
+    fn bind(
+        self: Arc<Self>,
+        _handle: &wayland_backend::server::Handle,
+        _data: &mut (),
+        _client_id: ClientId,
+        _global_id: GlobalId,
+        object_id: ObjectId,
+    ) -> Arc<dyn ObjectData<()>> {
+        self.log.0.lock().unwrap().push((self.label, object_id));
+        Arc::new(Obj {
+            children: Some(self.children.clone()),
+        })
+    }
+}
+
+struct MiniServer {
+    backend: ServerBackend<()>,
+    bind_log: BindLog,
+    next_global: u32,
+    client: ClientId,
+    wm: Option<ObjectId>,
+    xkb: Option<ObjectId>,
+    layershell: Option<ObjectId>,
+    /// river_output_v1 object id per output name, for removal events.
+    output_ids: Vec<(String, ObjectId)>,
+    /// Every `new_id` child the client requested (layer-shell outputs, nodes).
+    children: Arc<Mutex<Vec<ObjectId>>>,
+}
+
+impl MiniServer {
+    fn new(stream: UnixStream) -> Self {
+        let backend = ServerBackend::<()>::new().unwrap();
+        let bind_log = BindLog::default();
+        let children = Arc::new(Mutex::new(Vec::new()));
+        // Globals advertised to every registry the client creates, in bind order.
+        let globals: [(
+            &'static wayland_backend::protocol::Interface,
+            u32,
+            &'static str,
+        ); 3] = [
+            (&RIVER_WINDOW_MANAGER_V1_INTERFACE, 4, "wm"),
+            (&RIVER_XKB_BINDINGS_V1_INTERFACE, 1, "xkb"),
+            (&RIVER_LAYER_SHELL_V1_INTERFACE, 1, "ls"),
+        ];
+        for (interface, version, label) in globals {
+            backend.handle().create_global(
+                interface,
+                version,
+                GenericGlobal::labeled(bind_log.clone(), label, children.clone()),
+            );
+        }
+        let client = backend
+            .handle()
+            .insert_client(stream, Arc::new(Client))
+            .unwrap();
+        MiniServer {
+            backend,
+            bind_log,
+            next_global: 3,
+            client,
+            wm: None,
+            xkb: None,
+            layershell: None,
+            output_ids: Vec::new(),
+            children,
+        }
+    }
+
+    fn output_id(&self, name: &str) -> ObjectId {
+        self.output_ids
+            .iter()
+            .find(|(n, _)| n == name)
+            .map(|(_, o)| o.clone())
+            .unwrap_or_else(|| panic!("no river_output_v1 for {name:?}"))
+    }
+
+    fn core_ids(&mut self) {
+        if self.wm.is_some() {
+            return;
+        }
+        let binds = self.bind_log.0.lock().unwrap().clone();
+        let get = |label: &str| {
+            binds
+                .iter()
+                .find(|(l, _)| *l == label)
+                .map(|(_, o)| o.clone())
+        };
+        self.wm = get("wm");
+        self.xkb = get("xkb");
+        self.layershell = get("ls");
+        assert!(
+            self.wm.is_some() && self.xkb.is_some() && self.layershell.is_some(),
+            "river globals not all bound: {binds:?}"
+        );
+    }
+
+    fn add_wl_output_global(&mut self) -> u32 {
+        self.next_global += 1;
+        let label: &'static str =
+            Box::leak(format!("wl_output:{}", self.next_global).into_boxed_str());
+        self.backend.handle().create_global(
+            &WL_OUTPUT_INTERFACE,
+            4,
+            GenericGlobal::labeled(self.bind_log.clone(), label, self.children.clone()),
+        );
+        self.next_global
+    }
+
+    fn create_object(
+        &mut self,
+        interface: &'static wayland_backend::protocol::Interface,
+    ) -> ObjectId {
+        self.backend
+            .handle()
+            .create_object(
+                self.client.clone(),
+                interface,
+                4,
+                Arc::new(Obj {
+                    children: Some(self.children.clone()),
+                }),
+            )
+            .unwrap()
+    }
+
+    fn send(&mut self, sender: ObjectId, opcode: u16, args: Vec<Argument<ObjectId, RawFd>>) {
+        let mut msg = Message {
+            sender_id: sender,
+            opcode,
+            args: Default::default(),
+        };
+        for a in args {
+            msg.args.push(a);
+        }
+        self.backend.handle().send_event(msg).unwrap();
+    }
+
+    fn process_and_flush(&mut self) -> usize {
+        let n = self.backend.dispatch_all_clients(&mut ()).unwrap();
+        self.backend.flush(None).unwrap();
+        n
+    }
+
+    fn wl_output_object(&self, gname: u32) -> ObjectId {
+        let label = format!("wl_output:{gname}");
+        self.bind_log
+            .0
+            .lock()
+            .unwrap()
+            .iter()
+            .find(|(l, _)| **l == label)
+            .map(|(_, o)| o.clone())
+            .unwrap_or_else(|| panic!("wl_output global {gname} never bound"))
+    }
+}
+
+struct Session {
+    queue: EventQueue<AppData>,
+    conn: Connection,
+    state: AppData,
+}
+
+impl Session {
+    fn new(server: &mut MiniServer, client_stream: UnixStream) -> Self {
+        let cbackend = ClientBackend::connect(client_stream).unwrap();
+        let conn = Connection::from_backend(cbackend);
+        let queue = conn.new_event_queue();
+        let qh: QueueHandle<AppData> = queue.handle();
+        let registry = conn.display().get_registry(&qh, ());
+        let state = AppData {
+            registry,
+            river_wm: None,
+            river_xkb: None,
+            river_layer_shell: None,
+            river_seat: None,
+            layer_shell_seat: None,
+            wm: WindowManager::new(config::default_config()),
+            xkb_bindings: Vec::new(),
+            pointer_bindings: Vec::new(),
+            qh: qh.clone(),
+        };
+        let mut s = Session { queue, conn, state };
+        s.pump(server);
+        server.core_ids();
+        assert!(
+            s.state.river_wm.is_some(),
+            "river_window_manager_v1 never bound"
+        );
+        assert!(
+            s.state.river_xkb.is_some(),
+            "river_xkb_bindings_v1 never bound"
+        );
+        s
+    }
+
+    /// Client requests out; server processes/replies; server events in;
+    /// repeat until both sides are quiescent.
+    fn pump(&mut self, server: &mut MiniServer) {
+        self.conn.flush().unwrap();
+        server.process_and_flush();
+        loop {
+            let mut progressed = false;
+            if let Some(guard) = self.queue.prepare_read()
+                && guard.read().is_ok()
+            {
+                progressed = true;
+            }
+            if self.queue.dispatch_pending(&mut self.state).unwrap() > 0 {
+                progressed = true;
+            }
+            self.conn.flush().unwrap();
+            if server.process_and_flush() > 0 {
+                progressed = true;
+            }
+            if !progressed {
+                break;
+            }
+        }
+    }
+
+    fn send(
+        &mut self,
+        server: &mut MiniServer,
+        sender: ObjectId,
+        opcode: u16,
+        args: Vec<Argument<ObjectId, RawFd>>,
+    ) {
+        server.send(sender, opcode, args);
+        self.pump(server);
+    }
+
+    /// Emit the layer-shell non-exclusive area for the newest child the
+    /// client created (layer_shell.get_output during the output event).
+    fn add_layershell_area(
+        &mut self,
+        server: &mut MiniServer,
+        x: i32,
+        y: i32,
+        width: i32,
+        height: i32,
+    ) {
+        let lso = server
+            .children
+            .lock()
+            .unwrap()
+            .last()
+            .cloned()
+            .expect("layer-shell output child created");
+        self.send(
+            server,
+            lso,
+            EVT_LSO_NON_EXCLUSIVE_AREA,
+            vec![
+                Argument::Int(x),
+                Argument::Int(y),
+                Argument::Int(width),
+                Argument::Int(height),
+            ],
+        );
+    }
+
+    fn manage(&mut self, server: &mut MiniServer) {
+        self.send(server, server.wm.clone().unwrap(), EVT_MANAGE_START, vec![]);
+    }
+
+    fn add_seat(&mut self, server: &mut MiniServer) {
+        let seat = server.create_object(&RIVER_SEAT_V1_INTERFACE);
+        self.send(
+            server,
+            server.wm.clone().unwrap(),
+            EVT_SEAT,
+            vec![Argument::NewId(seat)],
+        );
+    }
+
+    /// Full output add sequence, modeled on river's manageStart: wl_output
+    /// global -> river_window_manager_v1.output -> wl_output bind -> name,
+    /// position, dimensions, plus the layer-shell non-exclusive area.
+    fn add_output(
+        &mut self,
+        server: &mut MiniServer,
+        name: &str,
+        pos: (i32, i32),
+        dims: (i32, i32),
+    ) -> ObjectId {
+        let gname = server.add_wl_output_global();
+        let out = server.create_object(&RIVER_OUTPUT_V1_INTERFACE);
+        server.output_ids.push((name.to_string(), out.clone()));
+        self.send(
+            server,
+            server.wm.clone().unwrap(),
+            EVT_OUTPUT,
+            vec![Argument::NewId(out.clone())],
+        );
+        self.add_layershell_area(server, pos.0, pos.1, dims.0, dims.1);
+        self.send(
+            server,
+            out.clone(),
+            EVT_OUT_WL_OUTPUT,
+            vec![Argument::Uint(gname)],
+        );
+        let wl_out = server.wl_output_object(gname);
+        self.send(
+            server,
+            wl_out,
+            EVT_WL_OUTPUT_NAME,
+            vec![Argument::Str(Some(Box::new(CString::new(name).unwrap())))],
+        );
+        self.send(
+            server,
+            out.clone(),
+            EVT_OUT_POSITION,
+            vec![Argument::Int(pos.0), Argument::Int(pos.1)],
+        );
+        self.send(
+            server,
+            out.clone(),
+            EVT_OUT_DIMENSIONS,
+            vec![Argument::Int(dims.0), Argument::Int(dims.1)],
+        );
+        out
+    }
+
+    /// Map a window on the currently focused output/workspace.
+    fn add_window(&mut self, server: &mut MiniServer) -> ObjectId {
+        let win = server.create_object(&RIVER_WINDOW_V1_INTERFACE);
+        self.send(
+            server,
+            server.wm.clone().unwrap(),
+            EVT_WINDOW,
+            vec![Argument::NewId(win.clone())],
+        );
+        self.send(
+            server,
+            win.clone(),
+            EVT_WIN_DIMENSIONS,
+            vec![Argument::Int(800), Argument::Int(600)],
+        );
+        win
+    }
+
+    fn check_consistent(&mut self) {
+        let wm = &mut self.state.wm;
+        if let Some(foi) = wm.focused_output_idx {
+            assert!(
+                foi < wm.outputs.len(),
+                "focused_output_idx {foi} out of bounds ({} outputs)",
+                wm.outputs.len()
+            );
+            let out = &wm.outputs[foi];
+            assert!(!out.is_removed, "focused output is removed");
+        }
+        for (i, out) in wm.outputs.iter().enumerate() {
+            if out.is_removed {
+                continue;
+            }
+            for (wi, ws) in out.workspace_list.iter().enumerate() {
+                if let Some(f) = ws.focused_window_idx {
+                    assert!(f < ws.window_list.len(), "ws {i}/{wi} focus {f} OOB");
+                }
+            }
+        }
+    }
+}
+
+fn build() -> (Session, MiniServer) {
+    let (ca, cb) = UnixStream::pair().unwrap();
+    let mut server = MiniServer::new(cb);
+    let session = Session::new(&mut server, ca);
+    (session, server)
+}
+
+// ---------------------------------------------------------------------------
+// Scenarios
+// ---------------------------------------------------------------------------
+
+/// eDP-1 and HDMI both active; HDMI is unplugged. Focus is on HDMI.
+#[test]
+fn unplug_hdmi_while_edp_present() {
+    let (mut s, mut sv) = build();
+    s.add_seat(&mut sv);
+    s.manage(&mut sv);
+    s.manage(&mut sv); // bindings setup consumed one manage_start
+
+    s.add_output(&mut sv, "eDP-1", (0, 0), (1920, 1080));
+    s.manage(&mut sv);
+    s.add_window(&mut sv); // focused: eDP-1
+    s.manage(&mut sv);
+
+    let hdmi = s.add_output(&mut sv, "HDMI-A-1", (1920, 0), (1920, 1080));
+    s.manage(&mut sv);
+    s.add_window(&mut sv); // focused: HDMI-A-1
+    s.manage(&mut sv);
+
+    // Unplug HDMI.
+    s.send(&mut sv, hdmi, EVT_OUT_REMOVED, vec![]);
+    s.manage(&mut sv);
+    s.check_consistent();
+
+    let wm = &s.state.wm;
+    assert_eq!(wm.outputs.len(), 1, "only eDP-1 should survive");
+    let edp = &wm.outputs[0];
+    assert_eq!(edp.name.as_deref(), Some("eDP-1"));
+    assert_eq!(wm.focused_output_idx, Some(0));
+    let edp_ws0 = &edp.workspace_list[0];
+    assert_eq!(
+        edp_ws0.window_list.len(),
+        2,
+        "HDMI windows migrate to eDP ws0"
+    );
+    assert_eq!(
+        edp_ws0.window_list[1].geom.former_output_name.as_deref(),
+        Some("HDMI-A-1"),
+        "migrated window remembers its source output"
+    );
+    layout::update(&mut s.state.wm);
+    s.check_consistent();
+}
+
+/// External-only setup: plugging HDMI removes eDP-1 (`detach`), unplugging
+/// HDMI leaves zero outputs (`detach`), then eDP-1 reappears and windows are
+/// restored. This is the reported crash: "back on eDP-1 after HDMI unplug".
+#[test]
+fn external_only_hdmi_unplug_returns_to_edp() {
+    let (mut s, mut sv) = build();
+    s.add_seat(&mut sv);
+    s.manage(&mut sv);
+    s.manage(&mut sv);
+
+    s.add_output(&mut sv, "eDP-1", (0, 0), (1920, 1080));
+    s.manage(&mut sv);
+    s.add_window(&mut sv);
+    s.manage(&mut sv);
+
+    // HDMI plugged, eDP-1 disabled (external-only mode).
+    let edp = sv.output_id("eDP-1");
+    s.send(&mut sv, edp, EVT_OUT_REMOVED, vec![]);
+    s.manage(&mut sv);
+    s.check_consistent();
+    assert_eq!(s.state.wm.outputs.len(), 0, "no outputs while HDMI-only");
+
+    let hdmi = s.add_output(&mut sv, "HDMI-A-1", (0, 0), (1920, 1080));
+    s.manage(&mut sv);
+    s.add_window(&mut sv);
+    s.manage(&mut sv);
+    assert!(!s.state.wm.detached_outputs.is_empty() || s.state.wm.outputs.len() == 1);
+
+    // Unplug HDMI: zero outputs left, workspaces detached and preserved.
+    s.send(&mut sv, hdmi, EVT_OUT_REMOVED, vec![]);
+    s.manage(&mut sv);
+    s.check_consistent();
+    assert_eq!(s.state.wm.outputs.len(), 0);
+    assert!(
+        !s.state.wm.detached_outputs.is_empty(),
+        "windows must survive the HDMI unplug"
+    );
+
+    // eDP-1 comes back: the "returning to eDP-1" moment.
+    s.add_output(&mut sv, "eDP-1", (0, 0), (1920, 1080));
+    s.manage(&mut sv);
+    s.check_consistent();
+
+    let wm = &s.state.wm;
+    assert_eq!(wm.outputs.len(), 1, "eDP-1 back");
+    assert_eq!(wm.outputs[0].name.as_deref(), Some("eDP-1"));
+    assert_eq!(wm.focused_output_idx, Some(0));
+    let total: usize = wm.outputs[0]
+        .workspace_list
+        .iter()
+        .map(|ws| ws.window_list.len())
+        .sum();
+    assert_eq!(total, 2, "both windows restored to eDP-1");
+    assert!(
+        wm.detached_outputs.is_empty(),
+        "restored workspaces are no longer detached"
+    );
+}
+
+/// Detach (last output removed) then re-add by the same name: the
+/// name-keyed restore path in layout::apply.
+#[test]
+fn detach_then_readd_same_name_restores_windows() {
+    let (mut s, mut sv) = build();
+    s.add_seat(&mut sv);
+    s.manage(&mut sv);
+    s.manage(&mut sv);
+
+    s.add_output(&mut sv, "eDP-1", (0, 0), (1920, 1080));
+    s.manage(&mut sv);
+    s.add_window(&mut sv);
+    s.manage(&mut sv);
+
+    // eDP-1 disabled, then re-enabled.
+    let edp = sv.output_id("eDP-1");
+    s.send(&mut sv, edp, EVT_OUT_REMOVED, vec![]);
+    s.manage(&mut sv);
+    s.check_consistent();
+
+    // eDP-1 back as the only output.
+    s.add_output(&mut sv, "eDP-1", (0, 0), (1920, 1080));
+    s.manage(&mut sv);
+    s.check_consistent();
+    let wm = &s.state.wm;
+    assert_eq!(wm.outputs.len(), 1);
+    let total: usize = wm.outputs[0]
+        .workspace_list
+        .iter()
+        .map(|ws| ws.window_list.len())
+        .sum();
+    assert!(total >= 1, "window survives the cycle");
+    assert_eq!(wm.focused_output_idx, Some(0));
+}
+/// The reported crash: laptop display (1360x768) OFF while a 2K HDMI
+/// (2560x1440) is the only active screen; HDMI is unplugged and the laptop
+/// comes back. Every window must land back on the laptop AND fit within its
+/// smaller bounds — a floating window centered on the 2K screen must not
+/// overhang the 1360x768 screen (the "没有适应" symptom).
+#[test]
+fn hdmi_2k_unplug_restores_small_laptop_screen() {
+    let (mut s, mut sv) = build();
+    s.add_seat(&mut sv);
+    s.manage(&mut sv);
+    s.manage(&mut sv);
+
+    s.add_output(&mut sv, "eDP-1", (0, 0), (1360, 768));
+    s.manage(&mut sv);
+    s.add_window(&mut sv);
+    s.manage(&mut sv);
+
+    // HDMI plugged, laptop screen disabled: tiled window migrates to 2K.
+    let hdmi = s.add_output(&mut sv, "HDMI-A-1", (0, 0), (2560, 1440));
+    s.manage(&mut sv);
+    let edp = sv.output_id("eDP-1");
+    s.send(&mut sv, edp, EVT_OUT_REMOVED, vec![]);
+    s.manage(&mut sv);
+    s.check_consistent();
+    assert_eq!(s.state.wm.outputs.len(), 1, "only HDMI while laptop is off");
+    assert_eq!(s.state.wm.outputs[0].name.as_deref(), Some("HDMI-A-1"));
+
+    // A second window, toggled floating on the 2K screen (centered rect,
+    // mirroring ToggleWorkspaceFloating).
+    s.add_window(&mut sv);
+    s.manage(&mut sv);
+    {
+        let wm = &mut s.state.wm;
+        let oi = wm.focused_output_idx.unwrap();
+        let ws = wm.outputs[oi].focused_workspace_idx;
+        let rect = wm.outputs[oi].rectangle;
+        let window = wm.outputs[oi].workspace_list[ws]
+            .window_list
+            .last_mut()
+            .unwrap();
+        window.geom.is_floating = true;
+        window.geom.floating = crate::layout::common::center_rectangle(rect, &wm.config);
+    }
+    s.manage(&mut sv);
+    s.check_consistent();
+
+    // Unplug HDMI: zero outputs, workspaces detached and preserved.
+    s.send(&mut sv, hdmi, EVT_OUT_REMOVED, vec![]);
+    s.manage(&mut sv);
+    assert_eq!(s.state.wm.outputs.len(), 0, "nothing left while laptop off");
+    assert!(!s.state.wm.detached_outputs.is_empty(), "windows preserved");
+
+    // Laptop screen comes back: the "回到笔记本屏幕" moment.
+    s.add_output(&mut sv, "eDP-1", (0, 0), (1360, 768));
+    s.manage(&mut sv);
+    s.check_consistent();
+
+    let wm = &s.state.wm;
+    assert_eq!(wm.outputs.len(), 1, "eDP-1 back");
+    assert_eq!(wm.outputs[0].name.as_deref(), Some("eDP-1"));
+    assert_eq!(wm.focused_output_idx, Some(0));
+    let out = wm.outputs[0].rectangle;
+    assert_eq!((out.width, out.height), (1360, 768));
+
+    let mut total = 0;
+    for ws in &wm.outputs[0].workspace_list {
+        for w in &ws.window_list {
+            total += 1;
+            let rect = w.geom.finish.unwrap_or(w.geom.current);
+            assert!(
+                rect.x >= out.x
+                    && rect.y >= out.y
+                    && rect.x + rect.width <= out.x + out.width
+                    && rect.y + rect.height <= out.y + out.height,
+                "window {total} {rect:?} overhangs the laptop {out:?}"
+            );
+        }
+    }
+    assert_eq!(total, 2, "both windows transferred back to the laptop");
+    assert!(
+        wm.detached_outputs.is_empty(),
+        "no detached workspaces left"
+    );
+}
+
+/// HDMI unplug and laptop re-enable in the SAME batch, before one manage:
+/// the race the auto-detect path hits. No panic; windows come back on the
+/// laptop.
+#[test]
+fn unplug_and_readd_in_same_batch_returns_to_laptop() {
+    let (mut s, mut sv) = build();
+    s.add_seat(&mut sv);
+    s.manage(&mut sv);
+    s.manage(&mut sv);
+
+    s.add_output(&mut sv, "eDP-1", (0, 0), (1360, 768));
+    s.manage(&mut sv);
+    s.add_window(&mut sv);
+    s.manage(&mut sv);
+
+    // Laptop disabled while HDMI active; work on the 2K screen.
+    let hdmi = s.add_output(&mut sv, "HDMI-A-1", (0, 0), (2560, 1440));
+    s.manage(&mut sv);
+    let edp = sv.output_id("eDP-1");
+    s.send(&mut sv, edp, EVT_OUT_REMOVED, vec![]);
+    s.manage(&mut sv);
+    s.add_window(&mut sv);
+    s.manage(&mut sv);
+
+    // Both events before the manage: HDMI disappears, laptop returns.
+    s.send(&mut sv, hdmi, EVT_OUT_REMOVED, vec![]);
+    s.add_output(&mut sv, "eDP-1", (0, 0), (1360, 768));
+    s.manage(&mut sv);
+    s.check_consistent();
+
+    let wm = &s.state.wm;
+    assert_eq!(wm.outputs.len(), 1, "eDP-1 back");
+    assert_eq!(wm.outputs[0].name.as_deref(), Some("eDP-1"));
+    let total: usize = wm.outputs[0]
+        .workspace_list
+        .iter()
+        .map(|ws| ws.window_list.len())
+        .sum();
+    assert_eq!(total, 2, "both windows transferred back to the laptop");
+    assert!(wm.detached_outputs.is_empty());
+}
