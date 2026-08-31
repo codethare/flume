@@ -33,7 +33,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // (wmenu, shells, etc.). Using SIG_IGN would be inherited by children
     // and break their waitpid().
     unsafe {
-        let sa: libc::sigaction = std::mem::zeroed(); // handler = SIG_DFL
+        let sa: libc::sigaction = libc::sigaction {
+            sa_sigaction: libc::SIG_DFL as usize,
+            sa_mask: std::mem::zeroed(),
+            sa_flags: libc::SA_NOCLDWAIT | libc::SA_RESTART,
+            sa_restorer: None,
+        };
         libc::sigaction(libc::SIGCHLD, &sa, std::ptr::null_mut());
     }
     // Die when our parent (typically river -c flume) dies, so we don't get
