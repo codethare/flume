@@ -559,6 +559,17 @@ pub fn raise_floating_windows(wm: &mut WindowManager) {
 /// Commit layout targets immediately (no animation): current = finish.
 pub fn snap_to_finish(wm: &mut WindowManager) {
     let config = wm.config.clone();
+    // During overview every window's grid cell is drawn on the focused
+    // output (overview::enter), so visibility and clipping must be measured
+    // against that output, not each window's home output — otherwise all
+    // windows from the other displays are hidden/clipped off the grid.
+    let clip = if wm.overview_state.is_some() {
+        wm.focused_output_idx
+            .and_then(|i| wm.outputs.get(i))
+            .map(|o| o.rectangle)
+    } else {
+        None
+    };
     for output in &mut wm.outputs {
         if output.is_removed {
             continue;
@@ -572,7 +583,13 @@ pub fn snap_to_finish(wm: &mut WindowManager) {
                 } = window;
                 if let Some(finish) = geom.finish {
                     geom.current = finish;
-                    common::place_window(river_window, river_node, geom, output.rectangle, &config);
+                    common::place_window(
+                        river_window,
+                        river_node,
+                        geom,
+                        clip.unwrap_or(output.rectangle),
+                        &config,
+                    );
                     if geom.is_fullscreen {
                         river_window.inform_fullscreen();
                     } else {

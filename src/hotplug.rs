@@ -783,3 +783,56 @@ fn unplug_and_readd_in_same_batch_returns_to_laptop() {
     assert_eq!(total, 2, "both windows transferred back to the laptop");
     assert!(wm.detached_outputs.is_empty());
 }
+
+/// Regression: overview on a multi-display setup with different resolutions.
+/// The grid is drawn on the focused output (global coordinates), but
+/// place_window measured visibility/clip against each window's HOME output,
+/// so every window from another display was hidden or clipped off the grid
+/// (the "窗口错位/无法自适应" report). Both windows must land visibly inside
+/// the focused output.
+#[test]
+fn overview_keeps_foreign_display_windows_in_grid() {
+    let (mut s, mut sv) = build();
+    s.add_seat(&mut sv);
+    s.manage(&mut sv);
+    s.manage(&mut sv);
+
+    // Two displays, different resolutions: eDP-1 1360x768 at origin,
+    // HDMI-A-1 2560x1440 to its right. Focus lands on HDMI (last added).
+    s.add_output(&mut sv, "eDP-1", (0, 0), (1360, 768));
+    s.manage(&mut sv);
+    s.add_window(&mut sv); // window homed on eDP-1
+    s.manage(&mut sv);
+
+    s.add_output(&mut sv, "HDMI-A-1", (1360, 0), (2560, 1440));
+    s.manage(&mut sv);
+    s.add_window(&mut sv); // window homed on HDMI
+    s.manage(&mut sv);
+    s.check_consistent();
+    assert_eq!(s.state.wm.focused_output_idx, Some(1));
+
+    // Enter overview: grid on the focused output (HDMI), global coords.
+    crate::overview::enter(&mut s.state);
+    s.state.wm.status = crate::types::Status::Overview;
+    s.manage(&mut sv);
+    s.check_consistent();
+
+    let wm = &s.state.wm;
+    let grid = wm.outputs[1].rectangle;
+    for (oi, label) in [(0usize, "eDP-1"), (1, "HDMI-A-1")] {
+        let w = &wm.outputs[oi].workspace_list[0].window_list[0];
+        let r = w.geom.current;
+        assert!(
+            r.x >= grid.x
+                && r.y >= grid.y
+                && r.x + r.width <= grid.x + grid.width
+                && r.y + r.height <= grid.y + grid.height,
+            "{label} window {r:?} outside the focused grid {grid:?}"
+        );
+        assert_eq!(
+            w.geom.sent_visible,
+            Some(true),
+            "{label} window was hidden from the overview grid"
+        );
+    }
+}
