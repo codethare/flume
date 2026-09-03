@@ -531,14 +531,9 @@ pub fn dispatch_action(state: &mut crate::app::AppData, action: &KeybindingActio
             if window_idx >= workspace.window_list.len() {
                 return;
             }
-            let target = if right {
-                window_idx + 1
-            } else {
-                window_idx - 1
-            };
-            if right && target >= workspace.window_list.len() {
+            let Some(target) = move_target(window_idx, workspace.window_list.len(), right) else {
                 return;
-            }
+            };
             workspace.window_list.swap(window_idx, target);
             workspace.focused_window_idx = Some(target);
         }
@@ -791,6 +786,19 @@ pub fn dispatch_action(state: &mut crate::app::AppData, action: &KeybindingActio
     state.wm.status = Status::Layout;
 }
 
+/// Swap target for a horizontal window move; None when the move stays in
+/// place (list edge, or the underflow that used to panic with index
+/// 18446744073709551615 when focus sat on window 0 and `window_idx - 1`
+/// wrapped). Mirrors the `window_idx == 0` guard of FocusWindowLeft.
+fn move_target(window_idx: usize, len: usize, right: bool) -> Option<usize> {
+    let target = if right {
+        window_idx.checked_add(1)?
+    } else {
+        window_idx.checked_sub(1)?
+    };
+    (target < len).then_some(target)
+}
+
 /// Find the output adjacent to `output_idx` in the action's direction
 /// (rectangle adjacency, matching rill-ed).
 fn adjacent_output(
@@ -963,5 +971,18 @@ mod dispatch_tests {
         assert_eq!(m, Modifiers::Mod4.union(Modifiers::Shift));
         assert!(parse_modifiers(&["bogus".into()]).is_err());
         assert_eq!(parse_modifiers(&[]).unwrap(), Modifiers::None);
+    }
+
+    #[test]
+    fn move_target_bounds() {
+        // Regression: focus on window 0 with 2 windows, move left used to
+        // underflow to u64::MAX and panic in window_list.swap.
+        assert_eq!(move_target(0, 2, false), None);
+        assert_eq!(move_target(1, 2, false), Some(0));
+        assert_eq!(move_target(0, 2, true), Some(1));
+        assert_eq!(move_target(1, 2, true), None);
+        assert_eq!(move_target(0, 1, true), None);
+        assert_eq!(move_target(usize::MAX, 2, false), None);
+        assert_eq!(move_target(usize::MAX, 2, true), None);
     }
 }
