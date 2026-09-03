@@ -9,6 +9,8 @@ pub enum Button {
     Left,
     Right,
     Middle,
+    Side,
+    Extra,
 }
 
 impl Button {
@@ -18,6 +20,8 @@ impl Button {
             Button::Left => 0x110,
             Button::Right => 0x111,
             Button::Middle => 0x112,
+            Button::Side => 0x113,
+            Button::Extra => 0x114,
         }
     }
 }
