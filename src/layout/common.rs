@@ -222,7 +222,7 @@ pub fn place_window(
         geom.sent_visible = Some(visible);
     }
 
-    let clip = compute_clip_box(geom.current, output_rect, config.border.width);
+    let clip = compute_clip_box(geom.current, output_rect, border_width as u8);
     if geom.sent_clip.is_none_or(|sent| !sent.eql(clip)) {
         river_window.set_clip_box(clip.x, clip.y, clip.width, clip.height);
         geom.sent_clip = Some(clip);

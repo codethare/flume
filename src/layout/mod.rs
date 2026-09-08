@@ -608,9 +608,18 @@ pub fn apply_window_border(
     is_focused: bool,
     config: &crate::types::Config,
 ) {
+    // Fullscreen windows fill their output rect exactly (place_window uses
+    // border 0 for them); any border would be drawn by the compositor beyond
+    // the rect, spilling onto a neighboring monitor's adjoining edge. Suppress
+    // borders for fullscreen like place_window does.
+    let width = if geom.is_fullscreen {
+        0
+    } else {
+        config.border.width
+    };
     // Dedup against sent state; if unchanged, skip the request.
-    let need = geom.sent_border_focused != Some(is_focused)
-        || geom.sent_border_width != Some(config.border.width);
+    let need =
+        geom.sent_border_focused != Some(is_focused) || geom.sent_border_width != Some(width);
     if !need {
         return;
     }
@@ -621,14 +630,14 @@ pub fn apply_window_border(
     };
     river_window.set_borders(
         common::edges_all(),
-        config.border.width as i32,
+        width as i32,
         color.0,
         color.1,
         color.2,
         color.3,
     );
     geom.sent_border_focused = Some(is_focused);
-    geom.sent_border_width = Some(config.border.width);
+    geom.sent_border_width = Some(width);
 }
 
 /// Convert a config color to river's 32-bit channel values.

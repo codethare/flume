@@ -64,19 +64,44 @@ const EVT_OUT_POSITION: u16 = 2;
 const EVT_OUT_DIMENSIONS: u16 = 3;
 // river_window_v1 events
 const EVT_WIN_DIMENSIONS: u16 = 2;
+// river_seat_v1 events (declaration order: removed=0, wl_seat=1,
+// pointer_enter=2, pointer_leave=3, window_interaction=4)
+const EVT_SEAT_POINTER_ENTER: u16 = 2;
 // river_layer_shell_output_v1 events
 const EVT_LSO_NON_EXCLUSIVE_AREA: u16 = 0;
 
 // wl_output events (geometry=0, mode=1, done=2, scale=3)
 const EVT_WL_OUTPUT_NAME: u16 = 4;
 
+/// One client request observed by the mini-server: (object, opcode, args).
+type RequestLogEntry = (ObjectId, u16, String);
+
+fn fmt_args<F>(args: &[Argument<ObjectId, F>]) -> String {
+    args.iter()
+        .map(|a| match a {
+            Argument::Int(v) => format!("i{v}"),
+            Argument::Uint(v) => format!("u{v}"),
+            Argument::Fixed(v) => format!("f{v}"),
+            Argument::Str(Some(s)) => format!("s({})", s.to_string_lossy()),
+            Argument::Str(None) => "s(null)".into(),
+            Argument::Object(o) => format!("o{o:?}"),
+            Argument::NewId(o) => format!("n{o:?}"),
+            Argument::Array(_) => "a[]".into(),
+            Argument::Fd(_) => "fd".into(),
+        })
+        .collect::<Vec<_>>()
+        .join(",")
+}
+
 /// Generic no-op server object: tolerates every request flume makes, and
 /// returns fresh `Obj` data for children it creates via `new_id` requests.
 /// Records every `new_id` child it spawns so tests can send events on them
-/// (e.g. `non_exclusive_area` on layer-shell outputs).
+/// (e.g. `non_exclusive_area` on layer-shell outputs), and every request the
+/// client makes so tests can inspect what flume sends for a window.
 #[derive(Default)]
 struct Obj {
     children: Option<Arc<Mutex<Vec<ObjectId>>>>,
+    requests: Option<Arc<Mutex<Vec<RequestLogEntry>>>>,
 }
 
 impl ObjectData<()> for Obj {
@@ -87,6 +112,11 @@ impl ObjectData<()> for Obj {
         _client_id: ClientId,
         msg: Message<ObjectId, OwnedFd>,
     ) -> Option<Arc<dyn ObjectData<()>>> {
+        if let Some(log) = &self.requests {
+            log.lock()
+                .unwrap()
+                .push((msg.sender_id.clone(), msg.opcode, fmt_args(&msg.args)));
+        }
         let mut has_new_id = false;
         for a in &msg.args {
             if let Argument::NewId(id) = a {
@@ -99,6 +129,7 @@ impl ObjectData<()> for Obj {
         if has_new_id {
             Some(Arc::new(Obj {
                 children: self.children.clone(),
+                requests: self.requests.clone(),
             }))
         } else {
             None
@@ -128,6 +159,7 @@ struct GenericGlobal {
     log: BindLog,
     label: &'static str,
     children: Arc<Mutex<Vec<ObjectId>>>,
+    requests: Arc<Mutex<Vec<RequestLogEntry>>>,
 }
 
 impl GenericGlobal {
@@ -135,11 +167,13 @@ impl GenericGlobal {
         log: BindLog,
         label: &'static str,
         children: Arc<Mutex<Vec<ObjectId>>>,
+        requests: Arc<Mutex<Vec<RequestLogEntry>>>,
     ) -> Arc<dyn GlobalHandler<()>> {
         Arc::new(GenericGlobal {
             log,
             label,
             children,
+            requests,
         })
     }
 }
@@ -156,6 +190,7 @@ impl GlobalHandler<()> for GenericGlobal {
         self.log.0.lock().unwrap().push((self.label, object_id));
         Arc::new(Obj {
             children: Some(self.children.clone()),
+            requests: Some(self.requests.clone()),
         })
     }
 }
@@ -172,6 +207,8 @@ struct MiniServer {
     output_ids: Vec<(String, ObjectId)>,
     /// Every `new_id` child the client requested (layer-shell outputs, nodes).
     children: Arc<Mutex<Vec<ObjectId>>>,
+    /// Every request the client made, keyed by target object.
+    request_log: Arc<Mutex<Vec<RequestLogEntry>>>,
 }
 
 impl MiniServer {
@@ -179,6 +216,7 @@ impl MiniServer {
         let backend = ServerBackend::<()>::new().unwrap();
         let bind_log = BindLog::default();
         let children = Arc::new(Mutex::new(Vec::new()));
+        let requests = Arc::new(Mutex::new(Vec::new()));
         // Globals advertised to every registry the client creates, in bind order.
         let globals: [(
             &'static wayland_backend::protocol::Interface,
@@ -193,7 +231,7 @@ impl MiniServer {
             backend.handle().create_global(
                 interface,
                 version,
-                GenericGlobal::labeled(bind_log.clone(), label, children.clone()),
+                GenericGlobal::labeled(bind_log.clone(), label, children.clone(), requests.clone()),
             );
         }
         let client = backend
@@ -210,7 +248,27 @@ impl MiniServer {
             layershell: None,
             output_ids: Vec::new(),
             children,
+            request_log: requests,
         }
+    }
+
+    /// Every request the client made on `object`, in arrival order.
+    fn requests_for(&self, object: &ObjectId) -> Vec<RequestLogEntry> {
+        self.request_log
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|(o, _, _)| o == object)
+            .cloned()
+            .collect()
+    }
+
+    fn clear_request_log(&self) {
+        self.request_log.lock().unwrap().clear();
+    }
+
+    fn request_log_all(&self) -> Vec<RequestLogEntry> {
+        self.request_log.lock().unwrap().clone()
     }
 
     fn output_id(&self, name: &str) -> ObjectId {
@@ -248,7 +306,12 @@ impl MiniServer {
         self.backend.handle().create_global(
             &WL_OUTPUT_INTERFACE,
             4,
-            GenericGlobal::labeled(self.bind_log.clone(), label, self.children.clone()),
+            GenericGlobal::labeled(
+                self.bind_log.clone(),
+                label,
+                self.children.clone(),
+                self.request_log.clone(),
+            ),
         );
         self.next_global
     }
@@ -265,6 +328,7 @@ impl MiniServer {
                 4,
                 Arc::new(Obj {
                     children: Some(self.children.clone()),
+                    requests: Some(self.request_log.clone()),
                 }),
             )
             .unwrap()
@@ -410,14 +474,15 @@ impl Session {
         self.send(server, server.wm.clone().unwrap(), EVT_MANAGE_START, vec![]);
     }
 
-    fn add_seat(&mut self, server: &mut MiniServer) {
+    fn add_seat(&mut self, server: &mut MiniServer) -> ObjectId {
         let seat = server.create_object(&RIVER_SEAT_V1_INTERFACE);
         self.send(
             server,
             server.wm.clone().unwrap(),
             EVT_SEAT,
-            vec![Argument::NewId(seat)],
+            vec![Argument::NewId(seat.clone())],
         );
+        seat
     }
 
     /// Full output add sequence, modeled on river's manageStart: wl_output
@@ -834,5 +899,126 @@ fn overview_keeps_foreign_display_windows_in_grid() {
             Some(true),
             "{label} window was hidden from the overview grid"
         );
+    }
+}
+
+/// Focus-follows-pointer: hover refocuses exactly like clicking (sloppy
+/// focus) when `focus_follows_pointer` is enabled; with the toggle off,
+/// hovering must not move focus.
+#[test]
+fn pointer_enter_focus_follows_toggle() {
+    let (mut s, mut sv) = build();
+    let seat = s.add_seat(&mut sv);
+    s.manage(&mut sv);
+    s.add_output(&mut sv, "eDP-1", (0, 0), (1360, 768));
+    s.manage(&mut sv);
+    let a = s.add_window(&mut sv);
+    s.manage(&mut sv);
+    let b = s.add_window(&mut sv);
+    s.manage(&mut sv);
+    s.check_consistent();
+
+    let ws = &s.state.wm.outputs[0].workspace_list[0];
+    let initial = ws.focused_window_idx.expect("window has focus");
+    // Server-side id for the event payload, client-side proxy for the check.
+    let (hover, hover_proxy) = if initial == 0 {
+        (b, ws.window_list[1].river_window.clone())
+    } else {
+        (a, ws.window_list[0].river_window.clone())
+    };
+
+    // Toggle off: hover changes nothing.
+    s.state.wm.config.focus_follows_pointer = false;
+    s.send(
+        &mut sv,
+        seat.clone(),
+        EVT_SEAT_POINTER_ENTER,
+        vec![Argument::Object(hover.clone())],
+    );
+    s.manage(&mut sv);
+    assert_eq!(
+        s.state.wm.outputs[0].workspace_list[0].focused_window_idx,
+        Some(initial),
+        "hover must not move focus when focus_follows_pointer is off"
+    );
+
+    // Toggle on: hovering the other window refocuses it.
+    s.state.wm.config.focus_follows_pointer = true;
+    s.send(
+        &mut sv,
+        seat,
+        EVT_SEAT_POINTER_ENTER,
+        vec![Argument::Object(hover)],
+    );
+    s.manage(&mut sv);
+    let ws = &s.state.wm.outputs[0].workspace_list[0];
+    let now = ws.focused_window_idx.expect("window has focus");
+    assert_ne!(now, initial, "hover must move focus when enabled");
+    assert_eq!(
+        ws.window_list[now].river_window, hover_proxy,
+        "focused window must be the hovered one"
+    );
+}
+
+/// Regression: a fullscreen window fills its output rect exactly, so any
+/// window border (and the -border clip offset) would be drawn 3px beyond the
+/// output onto a neighboring monitor's adjoining edge ("A屏衔接B屏方向的边缘
+/// 显示B屏幕全屏窗口边缘内容"). Fullscreen must send border width 0 and a
+/// zero-origin clip box.
+#[test]
+fn fullscreen_window_sends_no_border_and_zero_origin_clip() {
+    let (mut s, mut sv) = build();
+    s.add_seat(&mut sv);
+    s.manage(&mut sv);
+    // A at origin, B to the right (adjoining edge = A's right / B's left).
+    s.add_output(&mut sv, "A", (0, 0), (1920, 1080));
+    s.manage(&mut sv);
+    s.add_output(&mut sv, "B", (1920, 0), (1920, 1080));
+    s.manage(&mut sv);
+    s.state.wm.focused_output_idx = Some(0);
+    s.manage(&mut sv);
+    s.add_window(&mut sv); // window on A
+    s.manage(&mut sv);
+    s.state.wm.focused_output_idx = Some(1);
+    s.manage(&mut sv);
+    let b_win = s.add_window(&mut sv); // window to be fullscreened
+    s.manage(&mut sv);
+    s.state.wm.outputs[1].workspace_list[0].focused_window_idx = Some(0);
+    s.manage(&mut sv);
+
+    sv.clear_request_log();
+    crate::keybinding::dispatch_action(
+        &mut s.state,
+        &crate::actions::KeybindingAction::ToggleFullscreen,
+    );
+    s.manage(&mut sv);
+
+    for (_obj, op, args) in sv.requests_for(&b_win) {
+        if op == 8 {
+            // set_borders(edges, width, r, g, b, a)
+            let width: i32 = args
+                .split(',')
+                .nth(1)
+                .unwrap()
+                .trim_start_matches('i')
+                .parse()
+                .unwrap();
+            assert_eq!(
+                width, 0,
+                "fullscreen window must not set a border, got {args}"
+            );
+        }
+        if op == 21 {
+            // set_clip_box(x, y, w, h)
+            let v: Vec<i32> = args
+                .split(',')
+                .map(|a| a.trim_start_matches('i').parse().unwrap())
+                .collect();
+            assert_eq!(
+                (v[0], v[1]),
+                (0, 0),
+                "fullscreen clip box must be zero-origin, got {args}"
+            );
+        }
     }
 }
