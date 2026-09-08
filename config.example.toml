@@ -8,6 +8,9 @@ default_window_width = 0.5
 # Center the focused window (never, always, single)
 center_focused_window = "never"
 
+# Focus the window under the mouse pointer (sloppy focus)
+focus_follows_pointer = false
+
 # Disable client side decorations
 no_csd = true
 

@@ -12,6 +12,7 @@ use crate::layout;
 use crate::river::river_layer_shell_seat_v1::RiverLayerShellSeatV1;
 use crate::river::river_pointer_binding_v1::RiverPointerBindingV1;
 use crate::river::river_seat_v1::{self, RiverSeatV1};
+use crate::river::river_window_v1::RiverWindowV1;
 use crate::types::Status;
 use crate::wm::LayerShellFocus;
 
@@ -47,9 +48,16 @@ pub fn seat_event(
 
     match event {
         // During overview, hovering a window highlights it (macOS Mission
-        // Control style). Outside overview these events are ignored.
+        // Control style).
         river_seat_v1::Event::PointerEnter { window } => {
             let Some(ov_state) = &mut state.wm.overview_state else {
+                // Focus-follows-pointer (sloppy focus): hovering a window
+                // refocuses it exactly like clicking. No window under the
+                // pointer -> no change.
+                if state.wm.config.focus_follows_pointer && focus_window(state, &window) {
+                    layout::update(&mut state.wm);
+                    state.wm.status = Status::Layout;
+                }
                 return false;
             };
             if let Some(idx) = ov_state
@@ -86,42 +94,9 @@ pub fn seat_event(
                 return false;
             }
 
-            if state
-                .wm
-                .focused_window()
-                .map(|w| w.river_window == window)
-                .unwrap_or(false)
-            {
-                return false;
-            }
-
-            for target_output_idx in 0..state.wm.outputs.len() {
-                let target_ws_idx = state.wm.outputs[target_output_idx].focused_workspace_idx;
-                let Some(target_win_idx) = state
-                    .wm
-                    .workspace(target_output_idx, target_ws_idx)
-                    .unwrap()
-                    .window_list
-                    .iter()
-                    .position(|w| w.river_window == window)
-                else {
-                    continue;
-                };
-
-                state.wm.focused_output_idx = Some(target_output_idx);
-                state.wm.outputs[target_output_idx].workspace_list[target_ws_idx]
-                    .focused_window_idx = Some(target_win_idx);
-
-                if target_output_idx != output_idx {
-                    state.wm.previous_workspace = Some(crate::types::OverviewHome {
-                        output_idx,
-                        workspace_idx,
-                    });
-                }
-
+            if focus_window(state, &window) {
                 layout::update(&mut state.wm);
                 state.wm.status = Status::Layout;
-                return false;
             }
             false
         }
@@ -214,6 +189,50 @@ fn pointer_binding_action(state: &AppData, proxy: &RiverPointerBindingV1) -> Opt
         .iter()
         .find(|b| &b.proxy == proxy)
         .map(|b| b.action)
+}
+
+/// Focus the window under the pointer/click, wherever it lives (any output,
+/// any workspace). Mirrors rill-ed click-to-focus: switches the focused
+/// output and remembers the previous workspace for cross-output moves.
+/// Returns true if focus actually changed.
+fn focus_window(state: &mut AppData, window: &RiverWindowV1) -> bool {
+    if state
+        .wm
+        .focused_window()
+        .map(|w| w.river_window == *window)
+        .unwrap_or(false)
+    {
+        return false;
+    }
+    let Some((output_idx, workspace_idx)) = state.wm.current_ws_idx() else {
+        return false;
+    };
+    for target_output_idx in 0..state.wm.outputs.len() {
+        let target_ws_idx = state.wm.outputs[target_output_idx].focused_workspace_idx;
+        let Some(target_win_idx) = state
+            .wm
+            .workspace(target_output_idx, target_ws_idx)
+            .unwrap()
+            .window_list
+            .iter()
+            .position(|w| w.river_window == *window)
+        else {
+            continue;
+        };
+
+        state.wm.focused_output_idx = Some(target_output_idx);
+        state.wm.outputs[target_output_idx].workspace_list[target_ws_idx].focused_window_idx =
+            Some(target_win_idx);
+
+        if target_output_idx != output_idx {
+            state.wm.previous_workspace = Some(crate::types::OverviewHome {
+                output_idx,
+                workspace_idx,
+            });
+        }
+        return true;
+    }
+    false
 }
 
 pub fn layer_shell_seat_event(

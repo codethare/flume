@@ -299,6 +299,8 @@ pub struct Config {
     pub no_csd: bool,
     pub border: Border,
     pub cursor: Option<Cursor>,
+    /// Focus the window under the pointer (sloppy focus).
+    pub focus_follows_pointer: bool,
     pub spawn_at_startup: Vec<Vec<String>>,
     pub keybindings: Vec<Keybinding>,
     pub pointer_bindings: Vec<PointerBinding>,
@@ -335,6 +337,7 @@ impl Default for Config {
             no_csd: true,
             border: Border::default(),
             cursor: None,
+            focus_follows_pointer: false,
             spawn_at_startup: Vec::new(),
             keybindings: Vec::new(),
             pointer_bindings: Vec::new(),
