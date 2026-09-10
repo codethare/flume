@@ -570,12 +570,21 @@ pub fn snap_to_finish(wm: &mut WindowManager) {
     } else {
         None
     };
-    for output in &mut wm.outputs {
+    // The focused fullscreen window is handed to the compositor, which then
+    // owns its position and clips content, borders and decorations to the
+    // output (river-window-management-v1.fullscreen). Only the focused one:
+    // fullscreen windows on other workspaces must stay on the WM's own
+    // off-screen stacking, and the overview grid clears is_fullscreen anyway.
+    let focused_output_idx = wm.focused_output_idx;
+    for (output_idx, output) in wm.outputs.iter_mut().enumerate() {
         if output.is_removed {
             continue;
         }
-        for workspace in &mut output.workspace_list {
-            for window in &mut workspace.window_list {
+        let river_output = output.river_output.clone();
+        let focused_ws_idx = output.focused_workspace_idx;
+        for (workspace_idx, workspace) in output.workspace_list.iter_mut().enumerate() {
+            let ws_focus = workspace.focused_window_idx;
+            for (window_idx, window) in workspace.window_list.iter_mut().enumerate() {
                 let Window {
                     river_window,
                     river_node,
@@ -591,6 +600,12 @@ pub fn snap_to_finish(wm: &mut WindowManager) {
                         &config,
                     );
                     if geom.is_fullscreen {
+                        let is_focused = focused_output_idx == Some(output_idx)
+                            && workspace_idx == focused_ws_idx
+                            && Some(window_idx) == ws_focus;
+                        if is_focused {
+                            river_window.fullscreen(&river_output);
+                        }
                         river_window.inform_fullscreen();
                     } else {
                         river_window.inform_not_fullscreen();

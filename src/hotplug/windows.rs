@@ -70,6 +70,16 @@ fn fullscreen_window_sends_no_border_and_zero_origin_clip() {
     }
 }
 
+/// The `fullscreen` requests (opcode 19) sent for a window, as raw logged args.
+fn fullscreen_requests(server: &MiniServer, window: &ObjectId) -> Vec<String> {
+    server
+        .requests_for(window)
+        .into_iter()
+        .filter(|(_, op, _)| *op == 19)
+        .map(|(_, _, args)| args)
+        .collect()
+}
+
 /// window.rs: a client-side fullscreen request fills the window's output and
 /// the inverse request restores the tiled layout.
 #[test]
@@ -86,7 +96,7 @@ fn window_fullscreen_requests_toggle_and_fill_output() {
         &mut sv,
         win.clone(),
         EVT_WIN_FULLSCREEN_REQUESTED,
-        vec![Argument::Object(out)],
+        vec![Argument::Object(out.clone())],
     );
     s.manage(&mut sv);
     let output_rect = s.state.wm.outputs[0].rectangle;
@@ -103,8 +113,27 @@ fn window_fullscreen_requests_toggle_and_fill_output() {
         geom.eql(output_rect),
         "fullscreen window must fill its output: {geom:?} vs {output_rect:?}"
     );
+    // The compositor owns the geometry and clipping of a fullscreen window
+    // (river-window-management-v1.fullscreen); rill-ed requests it for the
+    // focused one and the port had dropped that line.
+    let reqs = fullscreen_requests(&sv, &win);
+    assert_eq!(
+        reqs.len(),
+        1,
+        "the focused fullscreen window must be handed to the compositor: {reqs:?}"
+    );
+    assert!(
+        reqs[0].contains(&format!("{out:?}")),
+        "fullscreen must target the window's own output: {reqs:?}"
+    );
 
-    s.send(&mut sv, win, EVT_WIN_EXIT_FULLSCREEN_REQUESTED, vec![]);
+    sv.clear_request_log();
+    s.send(
+        &mut sv,
+        win.clone(),
+        EVT_WIN_EXIT_FULLSCREEN_REQUESTED,
+        vec![],
+    );
     s.manage(&mut sv);
     assert!(
         !s.state.wm.outputs[0].workspace_list[0].window_list[0]
@@ -112,6 +141,54 @@ fn window_fullscreen_requests_toggle_and_fill_output() {
             .is_fullscreen,
         "exit_fullscreen_requested must clear the flag"
     );
+    assert!(
+        fullscreen_requests(&sv, &win).is_empty(),
+        "a window that left fullscreen must not be re-handed to the compositor"
+    );
+}
+
+/// window.rs/layout: a fullscreen window that is *not* focused stays on the
+/// WM's own off-screen workspace stacking and is never handed to the
+/// compositor — otherwise the compositor would paint it over the focused
+/// workspace.
+#[test]
+fn unfocused_fullscreen_window_is_not_handed_to_the_compositor() {
+    let (mut s, mut sv) = build();
+    s.add_seat(&mut sv);
+    s.manage(&mut sv);
+    let out_a = s.add_output(&mut sv, "A", (0, 0), (1920, 1080));
+    s.manage(&mut sv);
+    let win_a = s.add_window(&mut sv);
+    s.manage(&mut sv);
+    s.add_output(&mut sv, "B", (1920, 0), (1920, 1080));
+    s.manage(&mut sv);
+    let win_b = s.add_window(&mut sv);
+    s.manage(&mut sv);
+    s.check_consistent();
+
+    // Fullscreen A's window while it is focused: it goes to the compositor.
+    s.state.wm.focused_output_idx = Some(0);
+    s.manage(&mut sv);
+    s.send(
+        &mut sv,
+        win_a.clone(),
+        EVT_WIN_FULLSCREEN_REQUESTED,
+        vec![Argument::Object(out_a)],
+    );
+    s.manage(&mut sv);
+    let reqs = fullscreen_requests(&sv, &win_a);
+    assert_eq!(reqs.len(), 1, "focused fullscreen goes to the compositor");
+
+    // Focus moves to B: the fullscreen window on A must not be handed over.
+    sv.clear_request_log();
+    s.state.wm.focused_output_idx = Some(1);
+    s.manage(&mut sv);
+    let reqs = fullscreen_requests(&sv, &win_a);
+    assert!(
+        reqs.is_empty(),
+        "unfocused fullscreen must not be handed to the compositor: {reqs:?}"
+    );
+    let _ = win_b;
 }
 
 /// window.rs: closing windows keeps the workspace focus index valid — the
