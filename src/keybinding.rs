@@ -844,8 +844,9 @@ fn reload_config(state: &mut crate::app::AppData) {
     }
     crate::layout::update(&mut state.wm);
 
+    // Flag only: assigning Status here loses the request if a layout-setting
+    // event (output/window) lands before the next manage sequence.
     state.wm.needs_setup_bindings = true;
-    state.wm.status = crate::types::Status::SetupBindings;
     state.manage_dirty();
 }
 

@@ -134,7 +134,11 @@ impl Dispatch<RiverWindowManagerV1, ()> for AppData {
             Event::Seat { id } => {
                 state.river_seat = Some(id);
                 crate::seat::seat_added(state, qh);
-                state.wm.status = Status::SetupBindings;
+                // Request binding setup via the flag: output/window events set
+                // `status` directly, so assigning Status::SetupBindings here
+                // loses the request whenever one of them lands before the next
+                // manage sequence (no keybindings at all).
+                state.wm.needs_setup_bindings = true;
             }
             Event::ManageStart => {
                 manage(state);
@@ -187,11 +191,6 @@ wayland_client::delegate_noop!(AppData: ignore RiverLayerShellV1);
 pub fn manage(state: &mut AppData) {
     use crate::types::Status;
 
-    if state.wm.needs_setup_bindings {
-        state.wm.status = Status::SetupBindings;
-        state.wm.needs_setup_bindings = false;
-    }
-
     if state.wm.focused_output_idx.is_none() {
         return;
     }
@@ -199,6 +198,14 @@ pub fn manage(state: &mut AppData) {
         eprintln!("Failed to find seat");
         return;
     };
+
+    // Handled only once the prerequisites exist: the seat event sets this flag,
+    // but manage returns early (dropping the request) while no output is
+    // focused yet.
+    if state.wm.needs_setup_bindings {
+        state.wm.status = Status::SetupBindings;
+        state.wm.needs_setup_bindings = false;
+    }
 
     match state.wm.status.clone() {
         Status::Layout => {

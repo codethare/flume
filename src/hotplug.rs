@@ -62,8 +62,17 @@ const EVT_OUT_REMOVED: u16 = 0;
 const EVT_OUT_WL_OUTPUT: u16 = 1;
 const EVT_OUT_POSITION: u16 = 2;
 const EVT_OUT_DIMENSIONS: u16 = 3;
-// river_window_v1 events
+// river_window_v1 events (declaration order: closed=0, dimensions_hint=1,
+// dimensions=2, app_id=3, ... fullscreen_requested=12, exit_fullscreen_requested=13)
+const EVT_WIN_CLOSED: u16 = 0;
 const EVT_WIN_DIMENSIONS: u16 = 2;
+const EVT_WIN_FULLSCREEN_REQUESTED: u16 = 12;
+const EVT_WIN_EXIT_FULLSCREEN_REQUESTED: u16 = 13;
+// river_seat_v1 events (…, op_delta=6, op_release=7)
+const EVT_SEAT_OP_DELTA: u16 = 6;
+const EVT_SEAT_OP_RELEASE: u16 = 7;
+// river_pointer_binding_v1 events (pressed=0, released=1)
+const EVT_PTR_BINDING_PRESSED: u16 = 0;
 // river_seat_v1 events (declaration order: removed=0, wl_seat=1,
 // pointer_enter=2, pointer_leave=3, window_interaction=4)
 const EVT_SEAT_POINTER_ENTER: u16 = 2;
@@ -265,10 +274,6 @@ impl MiniServer {
 
     fn clear_request_log(&self) {
         self.request_log.lock().unwrap().clear();
-    }
-
-    fn request_log_all(&self) -> Vec<RequestLogEntry> {
-        self.request_log.lock().unwrap().clone()
     }
 
     fn output_id(&self, name: &str) -> ObjectId {
@@ -1021,4 +1026,194 @@ fn fullscreen_window_sends_no_border_and_zero_origin_clip() {
             );
         }
     }
+}
+
+/// The seat's pointer binding objects in config order (left, right), created
+/// by setup_pointer_bindings during the first manage after `add_seat`.
+fn pointer_binding_objects(server: &MiniServer) -> Vec<ObjectId> {
+    let children = server.children.lock().unwrap();
+    assert!(children.len() >= 2, "pointer bindings not created yet");
+    children[children.len() - 2..].to_vec()
+}
+
+/// Node `set_position` requests seen in the log at the given coordinates.
+fn node_positions(server: &MiniServer, x: i32, y: i32) -> usize {
+    let want = format!("i{x},i{y}");
+    server
+        .request_log
+        .lock()
+        .unwrap()
+        .iter()
+        .filter(|(_, op, args)| *op == 1 && *args == want)
+        .count()
+}
+
+/// seat.rs: a pointer binding press starts a drag, op_delta follows the
+/// pointer (clamped to the output), op_release ends it. This is the
+/// `move_window` path behind drag-to-move and side-button bindings.
+#[test]
+fn pointer_binding_drag_moves_floating_window() {
+    let (mut s, mut sv) = build();
+    let seat = s.add_seat(&mut sv);
+    s.manage(&mut sv);
+    // Bindings are only created once a focused output exists (manage returns
+    // early before that), so capture them after the first output manage.
+    s.add_output(&mut sv, "A", (0, 0), (1920, 1080));
+    s.manage(&mut sv);
+    let binds = pointer_binding_objects(&sv);
+    let move_binding = binds[0].clone();
+
+    s.add_window(&mut sv);
+    s.manage(&mut sv);
+    s.check_consistent();
+
+    // Drag only applies to floating windows (seat.rs press handler).
+    crate::keybinding::dispatch_action(
+        &mut s.state,
+        &crate::actions::KeybindingAction::ToggleWorkspaceFloating,
+    );
+    s.manage(&mut sv);
+    let origin = s.state.wm.outputs[0].workspace_list[0].window_list[0]
+        .geom
+        .current;
+    assert!(
+        s.state.wm.outputs[0].workspace_list[0].window_list[0]
+            .geom
+            .is_floating,
+        "window must be floating for the drag binding to engage"
+    );
+
+    s.send(&mut sv, move_binding, EVT_PTR_BINDING_PRESSED, vec![]);
+    s.manage(&mut sv);
+    assert!(
+        matches!(
+            s.state.wm.status,
+            crate::types::Status::PointerAction(crate::actions::PointerAction::MoveWindow)
+        ),
+        "press must enter the move drag state, got {:?}",
+        s.state.wm.status
+    );
+
+    // Compose the op delta: the window follows the pointer, clamped to the
+    // output and pushed to the compositor.
+    sv.clear_request_log();
+    s.send(
+        &mut sv,
+        seat.clone(),
+        EVT_SEAT_OP_DELTA,
+        vec![Argument::Int(100), Argument::Int(50)],
+    );
+    s.manage(&mut sv);
+    let moved = s.state.wm.outputs[0].workspace_list[0].window_list[0]
+        .geom
+        .current;
+    assert_eq!(
+        (moved.x, moved.y),
+        (origin.x + 100, origin.y + 50),
+        "window must follow the pointer delta"
+    );
+    assert!(
+        node_positions(&sv, moved.x + 3, moved.y + 3) > 0,
+        "the dragged position must reach the compositor (border inset)"
+    );
+
+    s.send(&mut sv, seat, EVT_SEAT_OP_RELEASE, vec![]);
+    assert_eq!(
+        s.state.wm.status,
+        crate::types::Status::None,
+        "release ends the drag"
+    );
+    assert!(
+        s.state.wm.outputs[0].workspace_list[0].window_list[0]
+            .geom
+            .drag_origin
+            .is_none(),
+        "drag origin must be cleared on release"
+    );
+    s.manage(&mut sv);
+}
+
+/// window.rs: a client-side fullscreen request fills the window's output and
+/// the inverse request restores the tiled layout.
+#[test]
+fn window_fullscreen_requests_toggle_and_fill_output() {
+    let (mut s, mut sv) = build();
+    s.add_seat(&mut sv);
+    s.manage(&mut sv);
+    let out = s.add_output(&mut sv, "A", (0, 0), (1920, 1080));
+    s.manage(&mut sv);
+    let win = s.add_window(&mut sv);
+    s.manage(&mut sv);
+
+    s.send(
+        &mut sv,
+        win.clone(),
+        EVT_WIN_FULLSCREEN_REQUESTED,
+        vec![Argument::Object(out)],
+    );
+    s.manage(&mut sv);
+    let output_rect = s.state.wm.outputs[0].rectangle;
+    let geom = s.state.wm.outputs[0].workspace_list[0].window_list[0]
+        .geom
+        .current;
+    assert!(
+        s.state.wm.outputs[0].workspace_list[0].window_list[0]
+            .geom
+            .is_fullscreen,
+        "fullscreen_requested must set the flag"
+    );
+    assert!(
+        geom.eql(output_rect),
+        "fullscreen window must fill its output: {geom:?} vs {output_rect:?}"
+    );
+
+    s.send(&mut sv, win, EVT_WIN_EXIT_FULLSCREEN_REQUESTED, vec![]);
+    s.manage(&mut sv);
+    assert!(
+        !s.state.wm.outputs[0].workspace_list[0].window_list[0]
+            .geom
+            .is_fullscreen,
+        "exit_fullscreen_requested must clear the flag"
+    );
+}
+
+/// window.rs: closing windows keeps the workspace focus index valid — the
+/// off-by-one class that used to panic in window moves.
+#[test]
+fn closing_windows_keeps_focus_index_valid() {
+    let (mut s, mut sv) = build();
+    s.add_seat(&mut sv);
+    s.manage(&mut sv);
+    s.add_output(&mut sv, "A", (0, 0), (1920, 1080));
+    s.manage(&mut sv);
+    s.add_window(&mut sv);
+    s.manage(&mut sv);
+    let w1 = s.add_window(&mut sv);
+    s.manage(&mut sv);
+    let w2 = s.add_window(&mut sv);
+    s.manage(&mut sv);
+    s.check_consistent();
+
+    // Focus the middle window, close it: focus shifts to the one before it.
+    s.state.wm.outputs[0].workspace_list[0].focused_window_idx = Some(1);
+    s.manage(&mut sv);
+    s.send(&mut sv, w1, EVT_WIN_CLOSED, vec![]);
+    s.manage(&mut sv);
+    assert_eq!(
+        s.state.wm.outputs[0].workspace_list[0].focused_window_idx,
+        Some(0),
+        "closing the focused middle window moves focus down"
+    );
+    assert_eq!(s.state.wm.outputs[0].workspace_list[0].window_list.len(), 2);
+    s.check_consistent();
+
+    // Closing a window after the focused one leaves focus alone.
+    s.send(&mut sv, w2, EVT_WIN_CLOSED, vec![]);
+    s.manage(&mut sv);
+    assert_eq!(
+        s.state.wm.outputs[0].workspace_list[0].focused_window_idx,
+        Some(0),
+        "closing a later window must not move focus"
+    );
+    s.check_consistent();
 }
