@@ -19,6 +19,15 @@ The vendored state matches river
 | `river-xkb-bindings-v1.xml` | the revision before `65947fe` (2026-04-22) | 2 |
 | `river-layer-shell-v1.xml` | current `main` | 0 |
 
+The drift is almost entirely documentation. The only interface additions
+upstream are `river_window_v1.capture_sessions` and
+`river_output_v1.capture_sessions` (since 5: counts of active
+ext-image-copy-capture sessions) and, in the xkb protocol,
+`river_xkb_bindings_seat_v1.modifiers_watch` / `modifiers_update` (since 3).
+Every window management interface moved v4 → v5 and the xkb ones v2 → v3, so
+using any of this also means raising the bind versions in `src/app.rs` and
+running a river new enough to serve them.
+
 Verified by blob equality rather than by date, e.g. for the window management
 protocol:
 
