@@ -21,6 +21,7 @@ protocol. A port of [rill-ed](https://github.com/codethare/rill-ed) (Zig) with
 * Multi-output with window migration (windows return to their output when it reappears)
 * TTY switch resilience — workspaces survive output removal (laptop panel off, lock)
 * Window rules by exact `app_id` / glob `title` (force floating)
+* Focus follows the mouse pointer (opt-in, sloppy focus)
 * Session-lock focus save/restore
 
 ## Building
@@ -45,11 +46,32 @@ Config is searched at, in order:
 2. `$HOME/.config/flume/config.toml`
 
 If no file is found, the built-in defaults (identical to rill-ed's defaults,
-minus animations) are used. An empty `[keybindings]`/`[[pointer_bindings]]`
-section also falls back to the defaults. See
-[config.example.toml](config.example.toml) for a fully annotated example.
+minus animations) are used. A `[keybindings]` or `[[pointer_bindings]]` section
+**replaces the built-in list as a whole** — bindings do not merge — so an empty
+(or absent) section is how you keep the defaults. See
+[config.example.toml](config.example.toml) for an annotated example and the
+default key table below.
+
+Unknown keys are rejected at parse time: a typo is reported rather than
+silently ignored.
 
 `Super+r` reloads the config; on parse errors the current config is kept.
+
+### Top-level options
+
+| Option | Default | Meaning |
+|---|---|---|
+| `vertical_gap` | `9` | Gap between windows and the output's top/bottom edge |
+| `horizontal_gap` | `9` | Gap between adjacent windows |
+| `default_window_width` | `0.5` | Starting width of a new window, as a proportion of the output |
+| `center_focused_window` | `"never"` | Center the focused window: `never`, `always`, `single` |
+| `focus_follows_pointer` | `false` | Keyboard focus follows the mouse pointer (sloppy focus) |
+| `no_csd` | `true` | Disable client side decorations |
+| `border.width` | `3` | Border width in pixels |
+| `border.focused_color`, `border.unfocused_color` | | `{ r, g, b, a }` with 0–255 channels and 0.0–1.0 alpha |
+| `cursor.theme`, `cursor.size` | | XCursor theme and size (omit for the default cursor) |
+| `spawn_at_startup` | `[]` | Commands spawned detached at startup |
+| `window_rules` | `[]` | Match by `app_id` and/or glob `title`; matched windows float |
 
 ### Default keybindings
 
@@ -85,6 +107,11 @@ section also falls back to the defaults. See
 |---|---|
 | `Super` `Left Click` | Move floating window |
 | `Super` `Right Click` | Resize floating window |
+
+`[[pointer_bindings]]` takes `button = "left" | "right" | "middle" | "side" | "extra"`
+and any modifier list, including none. A bare button (empty `modifiers`) is how a
+touchpad gesture that a remapper turns into a mouse button — or an extra mouse
+button — drives `move_window` / `resize_window`.
 
 ## Differences from rill-ed
 

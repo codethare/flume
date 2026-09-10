@@ -135,14 +135,16 @@ mod tests {
         assert!(parse("[[window_rules]]\napp_id = \"x\"\nfloatng = true\n").is_err());
     }
 
-    /// The shipped example must stay parseable against the schema — catches
-    /// example/schema drift (e.g. a renamed config key). Its binding list is a
-    /// hand-maintained copy of the defaults, so only its shape is asserted.
+    /// The shipped example must parse against the schema and must not change
+    /// behaviour when copied verbatim: its binding sections are commented out,
+    /// so it falls back to the built-in defaults. A hand-maintained copy of
+    /// the defaults lived here before and had already drifted (46 of 64
+    /// bindings), silently dropping keybindings for anyone who copied it.
     #[test]
     fn example_config_parses() {
         let content = include_str!("../config.example.toml");
         let config = parse(content).expect("config.example.toml must parse");
-        assert!(!config.keybindings.is_empty());
-        assert_eq!(config.pointer_bindings.len(), 2);
+        assert_eq!(config.keybindings, default_keybindings());
+        assert_eq!(config.pointer_bindings, default_pointer_bindings());
     }
 }

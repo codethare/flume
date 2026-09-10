@@ -731,7 +731,7 @@ fn detach_then_readd_same_name_restores_windows() {
 /// (2560x1440) is the only active screen; HDMI is unplugged and the laptop
 /// comes back. Every window must land back on the laptop AND fit within its
 /// smaller bounds — a floating window centered on the 2K screen must not
-/// overhang the 1360x768 screen (the "没有适应" symptom).
+/// overhang the 1360x768 screen (the "does not fit" symptom).
 #[test]
 fn hdmi_2k_unplug_restores_small_laptop_screen() {
     let (mut s, mut sv) = build();
@@ -779,7 +779,7 @@ fn hdmi_2k_unplug_restores_small_laptop_screen() {
     assert_eq!(s.state.wm.outputs.len(), 0, "nothing left while laptop off");
     assert!(!s.state.wm.detached_outputs.is_empty(), "windows preserved");
 
-    // Laptop screen comes back: the "回到笔记本屏幕" moment.
+    // Laptop screen comes back: the "back to the laptop panel" moment.
     s.add_output(&mut sv, "eDP-1", (0, 0), (1360, 768));
     s.manage(&mut sv);
     s.check_consistent();
@@ -858,8 +858,8 @@ fn unplug_and_readd_in_same_batch_returns_to_laptop() {
 /// The grid is drawn on the focused output (global coordinates), but
 /// place_window measured visibility/clip against each window's HOME output,
 /// so every window from another display was hidden or clipped off the grid
-/// (the "窗口错位/无法自适应" report). Both windows must land visibly inside
-/// the focused output.
+/// (the "misplaced / cannot adapt" report). Both windows must land visibly
+/// inside the focused output.
 #[test]
 fn overview_keeps_foreign_display_windows_in_grid() {
     let (mut s, mut sv) = build();
@@ -967,8 +967,9 @@ fn pointer_enter_focus_follows_toggle() {
 
 /// Regression: a fullscreen window fills its output rect exactly, so any
 /// window border (and the -border clip offset) would be drawn 3px beyond the
-/// output onto a neighboring monitor's adjoining edge ("A屏衔接B屏方向的边缘
-/// 显示B屏幕全屏窗口边缘内容"). Fullscreen must send border width 0 and a
+/// output onto a neighboring monitor's adjoining edge ("the edge of A facing
+/// B shows the edge of B's fullscreen window"). Fullscreen must send border
+/// width 0 and a
 /// zero-origin clip box.
 #[test]
 fn fullscreen_window_sends_no_border_and_zero_origin_clip() {
