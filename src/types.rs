@@ -194,6 +194,7 @@ pub enum CenterFocused {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Color {
     pub r: u8,
     pub g: u8,
@@ -202,6 +203,7 @@ pub struct Color {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Border {
     pub width: u8,
     pub focused_color: Color,
@@ -209,6 +211,7 @@ pub struct Border {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Cursor {
     pub theme: String,
     pub size: u32,
@@ -217,10 +220,10 @@ pub struct Cursor {
 /// Rule matching windows by exact app_id and glob title. All set fields must
 /// match. Title supports `*` (any run, including empty) and `?` (single char).
 #[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
+#[serde(default, deny_unknown_fields)]
 pub struct WindowRule {
     pub app_id: Option<String>,
     pub title: Option<String>,
-    #[serde(default)]
     pub floating: bool,
 }
 
@@ -272,6 +275,7 @@ pub fn glob_match(pattern: &str, text: &str) -> bool {
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Keybinding {
     pub key: String,
     /// Modifier names: shift, ctrl, mod1, mod3, mod4, mod5.
@@ -280,6 +284,7 @@ pub struct Keybinding {
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct PointerBinding {
     pub button: Button,
     pub modifiers: Vec<String>,
@@ -287,7 +292,7 @@ pub struct PointerBinding {
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
-#[serde(default)]
+#[serde(default, deny_unknown_fields)]
 pub struct Config {
     /// Gap between windows and the output's top/bottom edge.
     pub vertical_gap: i32,

@@ -122,4 +122,27 @@ mod tests {
     fn parse_error_is_reported() {
         assert!(parse("vertical_gap = \"nine\"").is_err());
     }
+
+    /// Serde ignores unknown fields by default, so a typo'd toggle
+    /// (`focus_folows_pointer`) would be silently dropped and the user would
+    /// never know the setting didn't apply. Unknown keys must be loud.
+    #[test]
+    fn unknown_keys_are_rejected() {
+        assert!(parse("focus_folows_pointer = true").is_err());
+        assert!(parse("border = { widht = 3 }").is_err());
+        assert!(parse("[[keybindings]]\nkey = \"x\"\nmodifers = []\naction = \"exit\"\n").is_err());
+        assert!(parse("[[pointer_bindings]]\nbuton = \"middle\"\nmodifiers = []\naction = \"move_window\"\n").is_err());
+        assert!(parse("[[window_rules]]\napp_id = \"x\"\nfloatng = true\n").is_err());
+    }
+
+    /// The shipped example must stay parseable against the schema — catches
+    /// example/schema drift (e.g. a renamed config key). Its binding list is a
+    /// hand-maintained copy of the defaults, so only its shape is asserted.
+    #[test]
+    fn example_config_parses() {
+        let content = include_str!("../config.example.toml");
+        let config = parse(content).expect("config.example.toml must parse");
+        assert!(!config.keybindings.is_empty());
+        assert_eq!(config.pointer_bindings.len(), 2);
+    }
 }
