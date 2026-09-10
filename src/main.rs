@@ -34,7 +34,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // and break their waitpid().
     unsafe {
         let sa: libc::sigaction = libc::sigaction {
-            sa_sigaction: libc::SIG_DFL as usize,
+            sa_sigaction: libc::SIG_DFL,
             sa_mask: std::mem::zeroed(),
             sa_flags: libc::SA_NOCLDWAIT | libc::SA_RESTART,
             sa_restorer: None,
