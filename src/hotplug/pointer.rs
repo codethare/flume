@@ -148,3 +148,61 @@ fn pointer_binding_drag_moves_floating_window() {
     );
     s.manage(&mut sv);
 }
+
+/// A removed seat takes its bindings with it: river asserts that the previous
+/// bindings are gone before it hands out a seat object again, and the next
+/// seat must get a fresh, working set.
+#[test]
+fn removed_seat_destroys_its_bindings_and_a_new_seat_gets_new_ones() {
+    let (mut s, mut sv) = build();
+    let seat = s.add_seat(&mut sv);
+    s.manage(&mut sv);
+    s.add_output(&mut sv, "A", (0, 0), (1920, 1080));
+    s.manage(&mut sv);
+    s.add_wl_seat(&mut sv, seat.clone());
+    s.add_window(&mut sv);
+    s.manage(&mut sv);
+    assert_eq!(s.state.pointer_bindings.len(), 2);
+    assert!(s.state.river_seat.is_some());
+    assert!(s.state.wl_seat.is_some());
+    assert!(s.state.layer_shell_seat.is_some());
+
+    let bindings: Vec<ObjectId> = children_with_interface(&sv, "river_xkb_binding_v1")
+        .into_iter()
+        .chain(children_with_interface(&sv, "river_pointer_binding_v1"))
+        .collect();
+    assert!(!bindings.is_empty());
+
+    sv.clear_request_log();
+    s.send(&mut sv, seat.clone(), EVT_SEAT_REMOVED, vec![]);
+    assert!(
+        s.state.river_seat.is_none(),
+        "the stale seat proxy is dropped"
+    );
+    assert!(s.state.wl_seat.is_none());
+    assert!(s.state.layer_shell_seat.is_none());
+    assert!(s.state.xkb_bindings.is_empty());
+    assert!(s.state.pointer_bindings.is_empty());
+    assert_eq!(
+        count_requests(&sv, &seat, REQ_SEAT_DESTROY),
+        1,
+        "the removed seat object is destroyed"
+    );
+    let destroyed = bindings
+        .iter()
+        .filter(|b| count_requests(&sv, b, REQ_BINDING_DESTROY) == 1)
+        .count();
+    assert_eq!(
+        destroyed,
+        bindings.len(),
+        "every xkb and pointer binding is destroyed"
+    );
+
+    // A new seat re-establishes bindings.
+    s.add_seat(&mut sv);
+    s.manage(&mut sv);
+    assert!(s.state.river_seat.is_some());
+    assert_eq!(s.state.pointer_bindings.len(), 2);
+    assert!(s.state.xkb_bindings.len() > 50);
+    s.check_consistent();
+}

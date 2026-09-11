@@ -7,14 +7,6 @@
 
 use super::*;
 
-fn count_requests(server: &MiniServer, object: &ObjectId, opcode: u16) -> usize {
-    server
-        .requests_for(object)
-        .into_iter()
-        .filter(|(_, op, _)| *op == opcode)
-        .count()
-}
-
 /// Binding setup is requested by the seat event but must wait until an output
 /// is focused, and must happen exactly once. Assigning Status::SetupBindings
 /// directly used to lose the request whenever an output/window event set a

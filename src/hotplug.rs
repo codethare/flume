@@ -73,6 +73,10 @@ const EVT_WIN_EXIT_FULLSCREEN_REQUESTED: u16 = 13;
 // (destroy=0, set_layout_override=1, enable=2, disable=3)
 const EVT_XKB_BINDING_PRESSED: u16 = 0;
 const REQ_XKB_DISABLE: u16 = 3;
+// both river_xkb_binding_v1 and river_pointer_binding_v1 have destroy = 0
+const REQ_BINDING_DESTROY: u16 = 0;
+// river_seat_v1 events (removed=0, wl_seat=1, …)
+const EVT_SEAT_REMOVED: u16 = 0;
 // river_seat_v1 events (…, wl_seat=1)
 const EVT_SEAT_WL_SEAT: u16 = 1;
 // wl_seat events (capabilities=0, name=1)
@@ -89,6 +93,7 @@ const EVT_SESSION_UNLOCKED: u16 = 5;
 const REQ_WM_EXIT_SESSION: u16 = 6;
 // river_seat_v1 requests (focus_window=1, clear_focus=3, op_start_pointer=4,
 // op_end=5, get_pointer_binding=6)
+const REQ_SEAT_DESTROY: u16 = 0;
 const REQ_SEAT_FOCUS_WINDOW: u16 = 1;
 const REQ_SEAT_CLEAR_FOCUS: u16 = 3;
 const REQ_SEAT_OP_END: u16 = 5;
@@ -666,6 +671,15 @@ mod outputs;
 mod overview;
 mod pointer;
 mod windows;
+
+/// Requests with the given opcode seen on `object`.
+fn count_requests(server: &MiniServer, object: &ObjectId, opcode: u16) -> usize {
+    server
+        .requests_for(object)
+        .into_iter()
+        .filter(|(_, op, _)| *op == opcode)
+        .count()
+}
 
 /// Client-created objects of a given interface, in creation order.
 fn children_with_interface(server: &MiniServer, interface: &str) -> Vec<ObjectId> {

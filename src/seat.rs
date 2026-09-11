@@ -149,8 +149,11 @@ pub fn seat_event(
             geom.current = geom.floating;
             false
         }
-        river_seat_v1::Event::Removed
-        | river_seat_v1::Event::WlSeat { .. }
+        river_seat_v1::Event::Removed => {
+            seat_removed(state);
+            false
+        }
+        river_seat_v1::Event::WlSeat { .. }
         | river_seat_v1::Event::ShellSurfaceInteraction { .. }
         | river_seat_v1::Event::PointerPosition { .. } => false,
         river_seat_v1::Event::OpRelease => {
@@ -205,6 +208,30 @@ fn pointer_binding_action(state: &AppData, proxy: &RiverPointerBindingV1) -> Opt
         .iter()
         .find(|b| &b.proxy == proxy)
         .map(|b| b.action)
+}
+
+/// The seat is gone. river expects the window manager to destroy everything
+/// derived from it before it hands out a seat object again (its manageStart
+/// asserts that the previous bindings are gone), and a stale seat proxy would
+/// silently swallow focus requests.
+fn seat_removed(state: &mut AppData) {
+    for binding in state.xkb_bindings.drain(..) {
+        binding.proxy.destroy();
+    }
+    for binding in state.pointer_bindings.drain(..) {
+        binding.proxy.destroy();
+    }
+    if let Some(seat) = state.river_seat.take() {
+        seat.destroy();
+    }
+    state.layer_shell_seat = None;
+    state.wl_seat = None;
+    state.wl_pointer = None;
+    state.cursor_shape = None;
+    // The next seat needs focus handed to it again.
+    state.wm.layer_shell_focus = LayerShellFocus::None;
+    state.wm.last_focused_window = None;
+    state.wm.needs_refocus = true;
 }
 
 /// Focus the window under the pointer/click, wherever it lives (any output,
