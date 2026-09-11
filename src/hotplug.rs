@@ -69,6 +69,10 @@ const EVT_WIN_CLOSED: u16 = 0;
 const EVT_WIN_DIMENSIONS: u16 = 2;
 const EVT_WIN_FULLSCREEN_REQUESTED: u16 = 12;
 const EVT_WIN_EXIT_FULLSCREEN_REQUESTED: u16 = 13;
+// river_xkb_binding_v1 events (pressed=0, released=1) and requests
+// (destroy=0, set_layout_override=1, enable=2, disable=3)
+const EVT_XKB_BINDING_PRESSED: u16 = 0;
+const REQ_XKB_DISABLE: u16 = 3;
 // river_seat_v1 events (…, wl_seat=1)
 const EVT_SEAT_WL_SEAT: u16 = 1;
 // wl_seat events (capabilities=0, name=1)
@@ -658,6 +662,7 @@ fn build() -> (Session, MiniServer) {
 mod cursor;
 mod manage;
 mod outputs;
+mod overview;
 mod pointer;
 mod windows;
 

@@ -242,7 +242,9 @@ pub fn prune(state: &mut AppData) {
         .collect();
     let ov_state = state.wm.overview_state.as_mut().unwrap();
     if kept.is_empty() {
-        state.wm.overview_state = None;
+        // Let cancel() take the state: clearing it here would make cancel()
+        // return immediately, leaving the overview-only key grabs held and
+        // fullscreen windows unrestored. Dead entries are skipped by locate().
         cancel(state);
         return;
     }
