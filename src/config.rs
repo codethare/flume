@@ -153,4 +153,33 @@ mod tests {
         assert_eq!(config.keybindings, default_keybindings());
         assert_eq!(config.pointer_bindings, default_pointer_bindings());
     }
+
+    /// `-c/--config <path>`: the explicit-path branch of load/reload had no
+    /// coverage (only the argument parser and `parse` were tested).
+    #[test]
+    fn explicit_path_loads_and_reloads() {
+        let dir = std::env::temp_dir().join(format!("flume-config-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("config.toml");
+
+        std::fs::write(&path, "vertical_gap = 42\n").unwrap();
+        assert_eq!(load(Some(&path)).unwrap().vertical_gap, 42);
+
+        // A broken file is an error for load, and keeps the old config (None)
+        // for reload.
+        std::fs::write(&path, "vertical_gap = \"nine\"\n").unwrap();
+        assert!(load(Some(&path)).is_err());
+        assert!(reload(Some(&path)).is_none());
+
+        // An explicitly named file that does not exist is reported, not
+        // silently replaced by the built-in defaults.
+        let missing = dir.join("nope.toml");
+        assert_eq!(
+            load(Some(&missing)).unwrap_err().kind(),
+            std::io::ErrorKind::NotFound
+        );
+        assert!(reload(Some(&missing)).is_none());
+
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
 }
