@@ -149,7 +149,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // debugging spawned programs impractical (flume itself may be debugged
     // with it).
     for command in state.wm.config.spawn_at_startup.clone() {
-        let _ = spawn::spawn_detached(&command);
+        if let Err(e) = spawn::spawn_detached(&command) {
+            eprintln!("flume: cannot run spawn_at_startup {command:?}: {e}");
+        }
     }
 
     loop {

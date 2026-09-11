@@ -59,8 +59,28 @@ pub fn spawn_detached(argv: &[String]) -> Result<(), String> {
         }
 
         // Grandchild: exec the target program (never returns on success).
-        let _ = exec_search(&argv_c, &envp);
+        if exec_search(&argv_c, &envp).is_err() {
+            // The parent has already returned, so a failed exec is otherwise
+            // invisible (rill-ed prints here too).
+            child_warn("flume: failed to run ");
+            child_warn(&argv[0]);
+            child_warn("\n");
+        }
         libc::exit(1);
+    }
+}
+
+/// Write a diagnostic from the forked child to stderr. Only async-signal-safe
+/// calls are legal after fork, so this is a plain write(2) of caller-provided
+/// (already allocated) bytes; the caller must not allocate either.
+fn child_warn(message: &str) {
+    child_warn_to(2, message);
+}
+
+fn child_warn_to(fd: i32, message: &str) {
+    // SAFETY: writing already-allocated bytes to the given fd.
+    unsafe {
+        libc::write(fd, message.as_ptr().cast(), message.len());
     }
 }
 
@@ -108,5 +128,30 @@ mod tests {
     #[test]
     fn empty_argv_is_rejected() {
         assert!(super::spawn_detached(&[]).is_err());
+    }
+
+    #[test]
+    fn nul_byte_in_argv_is_rejected() {
+        let argv = vec!["alacritty".to_string(), "a\0b".to_string()];
+        assert!(super::spawn_detached(&argv).is_err());
+    }
+
+    /// The child's diagnostic path is a raw write(2): check it through a pipe.
+    #[test]
+    fn child_warn_writes_to_the_given_fd() {
+        let mut fds = [0i32; 2];
+        // SAFETY: plain pipe(2) with a valid array.
+        assert_eq!(unsafe { libc::pipe(fds.as_mut_ptr()) }, 0);
+        super::child_warn_to(fds[1], "flume: x");
+        let mut buf = [0u8; 8];
+        // SAFETY: reading from the pipe we just wrote to.
+        let n = unsafe { libc::read(fds[0], buf.as_mut_ptr().cast(), buf.len()) };
+        assert_eq!(n, 8);
+        assert_eq!(&buf, b"flume: x");
+        // SAFETY: closing both ends.
+        unsafe {
+            libc::close(fds[0]);
+            libc::close(fds[1]);
+        }
     }
 }
