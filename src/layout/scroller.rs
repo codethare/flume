@@ -20,7 +20,14 @@ pub fn apply(
 ) {
     for window in windows.iter_mut() {
         if window.is_floating {
-            let mut finish = window.floating;
+            // A floating window that goes fullscreen still fills the output.
+            // rill-ed leaves it at its rest rect here, which only looks right
+            // for the focused window (the compositor owns that one).
+            let mut finish = if window.is_fullscreen {
+                output_rect
+            } else {
+                window.floating
+            };
             finish.y += y_offset;
             window.finish = Some(finish);
         }

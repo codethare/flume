@@ -231,3 +231,40 @@ fn closing_windows_keeps_focus_index_valid() {
     );
     s.check_consistent();
 }
+
+/// A floating window that goes fullscreen fills its output. The compositor
+/// only owns the focused fullscreen window, so the WM's own geometry has to
+/// do it for the unfocused one — rill-ed leaves such a window at its rest
+/// rect here.
+#[test]
+fn floating_window_fullscreen_fills_the_output() {
+    let (mut s, mut sv) = build();
+    s.add_seat(&mut sv);
+    s.manage(&mut sv);
+    s.add_output(&mut sv, "A", (0, 0), (1920, 1080));
+    s.manage(&mut sv);
+    s.add_window(&mut sv);
+    s.manage(&mut sv);
+
+    crate::keybinding::dispatch_action(
+        &mut s.state,
+        &crate::actions::KeybindingAction::ToggleWorkspaceFloating,
+    );
+    s.manage(&mut sv);
+    crate::keybinding::dispatch_action(
+        &mut s.state,
+        &crate::actions::KeybindingAction::ToggleFullscreen,
+    );
+    s.manage(&mut sv);
+
+    let geom = &s.state.wm.outputs[0].workspace_list[0].window_list[0].geom;
+    let output_rect = s.state.wm.outputs[0].rectangle;
+    assert!(geom.is_floating && geom.is_fullscreen);
+    assert!(
+        geom.current.eql(output_rect),
+        "fullscreen floating window must fill the output: {:?} vs {:?}",
+        geom.current,
+        output_rect
+    );
+    s.check_consistent();
+}
