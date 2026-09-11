@@ -4,8 +4,12 @@
 //! Dispatch root: protocol globals, binding lists, and the window-manager
 //! global event dispatch. The manage cycle itself is wired in main.rs.
 
+use wayland_client::protocol::wl_pointer::WlPointer;
 use wayland_client::protocol::wl_registry::WlRegistry;
-use wayland_client::{Dispatch, Proxy, QueueHandle};
+use wayland_client::protocol::wl_seat::{self, WlSeat};
+use wayland_client::{Dispatch, Proxy, QueueHandle, WEnum};
+use wayland_protocols::wp::cursor_shape::v1::client::wp_cursor_shape_device_v1::WpCursorShapeDeviceV1;
+use wayland_protocols::wp::cursor_shape::v1::client::wp_cursor_shape_manager_v1::WpCursorShapeManagerV1;
 
 use crate::actions::{KeybindingAction, PointerAction};
 use crate::river::river_layer_shell_seat_v1::RiverLayerShellSeatV1;
@@ -36,6 +40,16 @@ pub struct AppData {
     pub river_layer_shell: Option<RiverLayerShellV1>,
     pub river_seat: Option<RiverSeatV1>,
     pub layer_shell_seat: Option<RiverLayerShellSeatV1>,
+    /// wl_seat of the river seat, bound so the window manager can set the
+    /// pointer cursor during pointer operations (river-window-management-v1
+    /// v4: the WM may set cursor surface/shape without pointer focus).
+    pub wl_seat: Option<WlSeat>,
+    /// wl_seat version advertised by the registry, needed to bind it later
+    /// from the river seat's `wl_seat` event (which only carries the name).
+    pub wl_seat_version: u32,
+    pub wl_pointer: Option<WlPointer>,
+    pub cursor_shape_manager: Option<WpCursorShapeManagerV1>,
+    pub cursor_shape: Option<WpCursorShapeDeviceV1>,
     pub wm: WindowManager,
     pub xkb_bindings: Vec<XkbBinding>,
     pub pointer_bindings: Vec<PointerBindingEntry>,
@@ -94,6 +108,11 @@ impl Dispatch<WlRegistry, ()> for AppData {
                     std::process::exit(1);
                 }
                 state.river_layer_shell = Some(registry.bind(name, VERSION, qh, ()));
+            }
+            // Optional: only used for cursor feedback during pointer ops.
+            "wl_seat" => state.wl_seat_version = version,
+            "wp_cursor_shape_manager_v1" => {
+                state.cursor_shape_manager = Some(registry.bind(name, 1, qh, ()));
             }
             _ => {}
         }
@@ -184,6 +203,42 @@ impl Dispatch<RiverWindowManagerV1, ()> for AppData {
 wayland_client::delegate_noop!(AppData: ignore RiverXkbBindingsV1);
 wayland_client::delegate_noop!(AppData: ignore crate::river::river_node_v1::RiverNodeV1);
 wayland_client::delegate_noop!(AppData: ignore RiverLayerShellV1);
+wayland_client::delegate_noop!(AppData: ignore WlPointer);
+wayland_client::delegate_noop!(AppData: ignore WpCursorShapeManagerV1);
+wayland_client::delegate_noop!(AppData: ignore WpCursorShapeDeviceV1);
+
+impl Dispatch<WlSeat, ()> for AppData {
+    fn event(
+        state: &mut Self,
+        seat: &WlSeat,
+        event: wl_seat::Event,
+        _data: &(),
+        _conn: &wayland_client::Connection,
+        qh: &QueueHandle<Self>,
+    ) {
+        let wl_seat::Event::Capabilities { capabilities } = event else {
+            return;
+        };
+        let WEnum::Value(capabilities) = capabilities else {
+            return;
+        };
+        if capabilities.contains(wl_seat::Capability::Pointer) {
+            if state.wl_pointer.is_none() {
+                let pointer = seat.get_pointer(qh, ());
+                state.cursor_shape = state
+                    .cursor_shape_manager
+                    .as_ref()
+                    .map(|manager| manager.get_pointer(&pointer, qh, ()));
+                state.wl_pointer = Some(pointer);
+            }
+        } else if let Some(pointer) = state.wl_pointer.take() {
+            if pointer.version() >= 3 {
+                pointer.release();
+            }
+            state.cursor_shape = None;
+        }
+    }
+}
 
 /// The manage-cycle state machine (rill-ed main.zig `manage`), dispatched on
 /// river_window_manager_v1.manage_start. No animation: layout passes commit

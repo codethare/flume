@@ -148,22 +148,3 @@ fn pointer_binding_drag_moves_floating_window() {
     );
     s.manage(&mut sv);
 }
-
-/// The seat's pointer binding objects in config order (left, right), created
-/// by setup_pointer_bindings during the first manage after `add_seat`.
-fn pointer_binding_objects(server: &MiniServer) -> Vec<ObjectId> {
-    let children = server.children.lock().unwrap();
-    assert!(children.len() >= 2, "pointer bindings not created yet");
-    children[children.len() - 2..].to_vec()
-}
-/// Node `set_position` requests seen in the log at the given coordinates.
-fn node_positions(server: &MiniServer, x: i32, y: i32) -> usize {
-    let want = format!("i{x},i{y}");
-    server
-        .request_log
-        .lock()
-        .unwrap()
-        .iter()
-        .filter(|(_, op, args)| *op == 1 && *args == want)
-        .count()
-}

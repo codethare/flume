@@ -46,6 +46,7 @@ mod ifaces {
 use ifaces::rls::*;
 use ifaces::rwm::*;
 use ifaces::rxkb::*;
+use wayland_protocols::wp::cursor_shape::v1::client::__interfaces::WP_CURSOR_SHAPE_MANAGER_V1_INTERFACE;
 
 // ---------------------------------------------------------------------------
 // Event opcodes (declaration order in the protocol XMLs; the client's
@@ -68,6 +69,15 @@ const EVT_WIN_CLOSED: u16 = 0;
 const EVT_WIN_DIMENSIONS: u16 = 2;
 const EVT_WIN_FULLSCREEN_REQUESTED: u16 = 12;
 const EVT_WIN_EXIT_FULLSCREEN_REQUESTED: u16 = 13;
+// river_seat_v1 events (…, wl_seat=1)
+const EVT_SEAT_WL_SEAT: u16 = 1;
+// wl_seat events (capabilities=0, name=1)
+const EVT_WL_SEAT_CAPABILITIES: u16 = 0;
+// wp_cursor_shape_device_v1 requests (destroy=0, set_shape=1)
+const REQ_CURSOR_SHAPE_SET_SHAPE: u16 = 1;
+// Name the server backend assigns to the wl_seat global (creation order:
+// wm=1, xkb=2, ls=3, wl_seat=4, cursor shape manager=5).
+const GLOBAL_NAME_WL_SEAT: u32 = 4;
 // river_window_manager_v1 events (…, session_locked=4, session_unlocked=5)
 const EVT_SESSION_LOCKED: u16 = 4;
 const EVT_SESSION_UNLOCKED: u16 = 5;
@@ -242,10 +252,14 @@ impl MiniServer {
             &'static wayland_backend::protocol::Interface,
             u32,
             &'static str,
-        ); 3] = [
+        ); 5] = [
             (&RIVER_WINDOW_MANAGER_V1_INTERFACE, 4, "wm"),
             (&RIVER_XKB_BINDINGS_V1_INTERFACE, 1, "xkb"),
             (&RIVER_LAYER_SHELL_V1_INTERFACE, 1, "ls"),
+            // Bound by the client only once river_seat_v1.wl_seat names it.
+            (&WL_SEAT_INTERFACE, 9, "wl_seat"),
+            // Optional cursor feedback during pointer operations.
+            (&WP_CURSOR_SHAPE_MANAGER_V1_INTERFACE, 1, "cursor_shape"),
         ];
         for (interface, version, label) in globals {
             backend.handle().create_global(
@@ -261,7 +275,7 @@ impl MiniServer {
         MiniServer {
             backend,
             bind_log,
-            next_global: 3,
+            next_global: 5,
             client,
             wm: None,
             xkb: None,
@@ -401,6 +415,11 @@ impl Session {
             river_layer_shell: None,
             river_seat: None,
             layer_shell_seat: None,
+            wl_seat: None,
+            wl_seat_version: 0,
+            wl_pointer: None,
+            cursor_shape_manager: None,
+            cursor_shape: None,
             wm: WindowManager::new(config::default_config()),
             xkb_bindings: Vec::new(),
             pointer_bindings: Vec::new(),
@@ -483,6 +502,33 @@ impl Session {
                 Argument::Int(width),
                 Argument::Int(height),
             ],
+        );
+    }
+
+    /// Announce the seat's wl_seat global and its pointer capability, which
+    /// makes the client bind wl_seat and create the wl_pointer plus (when the
+    /// compositor offers it) the cursor shape device.
+    fn add_wl_seat(&mut self, server: &mut MiniServer, seat: ObjectId) {
+        self.send(
+            server,
+            seat,
+            EVT_SEAT_WL_SEAT,
+            vec![Argument::Uint(GLOBAL_NAME_WL_SEAT)],
+        );
+        let wl_seat = server
+            .bind_log
+            .0
+            .lock()
+            .unwrap()
+            .iter()
+            .find(|(label, _)| *label == "wl_seat")
+            .map(|(_, object)| object.clone())
+            .expect("client bound wl_seat");
+        self.send(
+            server,
+            wl_seat,
+            EVT_WL_SEAT_CAPABILITIES,
+            vec![Argument::Uint(1)], // wl_seat::Capability::Pointer
         );
     }
 
@@ -602,7 +648,43 @@ fn build() -> (Session, MiniServer) {
 // Scenarios live in submodules so the harness stays navigable.
 // ---------------------------------------------------------------------------
 
+mod cursor;
 mod manage;
 mod outputs;
 mod pointer;
 mod windows;
+
+/// Client-created objects of a given interface, in creation order.
+fn children_with_interface(server: &MiniServer, interface: &str) -> Vec<ObjectId> {
+    server
+        .children
+        .lock()
+        .unwrap()
+        .iter()
+        .filter(|object| object.interface().name == interface)
+        .cloned()
+        .collect()
+}
+
+/// The seat's pointer binding objects in config order (left, right), created
+/// by setup_pointer_bindings during the first manage after `add_seat`.
+fn pointer_binding_objects(server: &MiniServer) -> Vec<ObjectId> {
+    let bindings = children_with_interface(server, "river_pointer_binding_v1");
+    assert_eq!(
+        bindings.len(),
+        2,
+        "expected the two default pointer bindings"
+    );
+    bindings
+}
+/// Node `set_position` requests seen in the log at the given coordinates.
+fn node_positions(server: &MiniServer, x: i32, y: i32) -> usize {
+    let want = format!("i{x},i{y}");
+    server
+        .request_log
+        .lock()
+        .unwrap()
+        .iter()
+        .filter(|(_, op, args)| *op == 1 && *args == want)
+        .count()
+}

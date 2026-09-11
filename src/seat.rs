@@ -15,6 +15,7 @@ use crate::river::river_seat_v1::{self, RiverSeatV1};
 use crate::river::river_window_v1::RiverWindowV1;
 use crate::types::Status;
 use crate::wm::LayerShellFocus;
+use wayland_protocols::wp::cursor_shape::v1::client::wp_cursor_shape_device_v1::Shape;
 
 /// A new river seat appeared (river_window_manager_v1.seat event).
 pub fn seat_added(state: &mut AppData, qh: &QueueHandle<AppData>) {
@@ -33,6 +34,13 @@ pub fn seat_event(
     _seat: &RiverSeatV1,
     event: <RiverSeatV1 as Proxy>::Event,
 ) -> bool {
+    // Handled before the focus guards below: the wl_seat must be bound even
+    // while no output or window exists yet (startup ordering, hotplug).
+    if let river_seat_v1::Event::WlSeat { name } = event {
+        let version = state.wl_seat_version;
+        state.wl_seat = Some(state.registry.bind(name, version, &state.qh, ()));
+        return false;
+    }
     let (output_idx, workspace_idx) = match state.wm.current_ws_idx() {
         Some(v) => v,
         None => return false,
@@ -155,6 +163,11 @@ pub fn seat_event(
                 .get_mut(focused_win_idx)
             {
                 window.geom.drag_origin = None;
+            }
+            // Hand the cursor back to the focused client.
+            if let Some(device) = &state.cursor_shape {
+                // river ignores the serial for the WM (river_seat_v1 v4).
+                device.set_shape(0, Shape::Default);
             }
             false
         }
@@ -341,6 +354,15 @@ impl Dispatch<RiverPointerBindingV1, ()> for AppData {
         };
         if !window.geom.is_floating || window.geom.is_fullscreen {
             return;
+        }
+        // Cursor feedback for the drag: river applies a WM-set shape while no
+        // client has pointer focus, which is exactly during a pointer op.
+        if let Some(device) = &state.cursor_shape {
+            let shape = match action {
+                PointerAction::MoveWindow => Shape::Move,
+                PointerAction::ResizeWindow => Shape::NwseResize,
+            };
+            device.set_shape(0, shape);
         }
         window.geom.drag_origin = Some(window.geom.current);
         state.wm.status = Status::PointerAction(action);

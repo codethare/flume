@@ -16,6 +16,7 @@ serde = { version = "1", features = ["derive"] }
 toml = "0.9"
 wayland-backend = "0.3.14"
 wayland-client = "0.31.13"
+wayland-protocols = { version = "0.32", features = ["client", "staging", "unstable"] }
 wayland-scanner = "0.31.9"
 libc = "0.2"
 xkbcommon = "0.8"
