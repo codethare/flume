@@ -46,7 +46,9 @@ unfocused_color = { r = 160, g = 160, b = 160, a = 1.0 }
 #   key:       keysym name (case insensitive) from xkbcommon-keysyms.h
 #   modifiers: shift, ctrl, mod1 (alt), mod3, mod4 (super), mod5
 #   action:    unit form ("close_window") or payload table form
-#              ({ adjust_window_width = -0.1 }); see README for the actions
+#              ({ adjust_window_width = -0.1 }); see README for the actions.
+#              spawn takes an argv list, not a shell line: for pipes use
+#              { spawn = ["sh", "-c", "foo | bar"] }
 #
 # [[keybindings]]
 # key = "q"

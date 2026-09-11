@@ -108,6 +108,11 @@ floated by hand stays floated.
 | `Super` `t` | Spawn alacritty |
 | `XF86Audio*` | Volume via `wpctl` |
 
+`spawn` takes an argv list, not a shell command line —
+`{ spawn = ["sh", "-c", "foo | bar"] }` is how you get pipes, variables or
+quoting. `toggle_workspace_floating` (historical name, kept for compatibility
+with rill-ed) toggles the focused *window*'s floating state.
+
 ### Default pointer bindings
 
 | Pointer binding | Action |
