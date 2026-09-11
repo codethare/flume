@@ -68,6 +68,17 @@ const EVT_WIN_CLOSED: u16 = 0;
 const EVT_WIN_DIMENSIONS: u16 = 2;
 const EVT_WIN_FULLSCREEN_REQUESTED: u16 = 12;
 const EVT_WIN_EXIT_FULLSCREEN_REQUESTED: u16 = 13;
+// river_window_manager_v1 events (…, session_locked=4, session_unlocked=5)
+const EVT_SESSION_LOCKED: u16 = 4;
+const EVT_SESSION_UNLOCKED: u16 = 5;
+// river_window_manager_v1 requests (…, exit_session=6)
+const REQ_WM_EXIT_SESSION: u16 = 6;
+// river_seat_v1 requests (focus_window=1, clear_focus=3, op_start_pointer=4,
+// op_end=5, get_pointer_binding=6)
+const REQ_SEAT_FOCUS_WINDOW: u16 = 1;
+const REQ_SEAT_CLEAR_FOCUS: u16 = 3;
+const REQ_SEAT_OP_END: u16 = 5;
+const REQ_SEAT_GET_POINTER_BINDING: u16 = 6;
 // river_seat_v1 events (…, op_delta=6, op_release=7)
 const EVT_SEAT_OP_DELTA: u16 = 6;
 const EVT_SEAT_OP_RELEASE: u16 = 7;
@@ -591,6 +602,7 @@ fn build() -> (Session, MiniServer) {
 // Scenarios live in submodules so the harness stays navigable.
 // ---------------------------------------------------------------------------
 
+mod manage;
 mod outputs;
 mod pointer;
 mod windows;
