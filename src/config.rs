@@ -50,7 +50,10 @@ fn read(path: &Path) -> Result<Config, io::Error> {
 /// Load config from the first candidate path that exists. Falls back to
 /// defaults when no file is found. Parse errors propagate so the caller can
 /// exit loudly.
-pub fn load() -> Result<Config, io::Error> {
+pub fn load(explicit: Option<&Path>) -> Result<Config, io::Error> {
+    if let Some(path) = explicit {
+        return read(path);
+    }
     for path in config_paths() {
         match read(&path) {
             Ok(config) => return Ok(config),
@@ -63,7 +66,10 @@ pub fn load() -> Result<Config, io::Error> {
 
 /// Reload config. Returns `None` (caller keeps the old config) when no file
 /// is found or parsing fails.
-pub fn reload() -> Option<Config> {
+pub fn reload(explicit: Option<&Path>) -> Option<Config> {
+    if let Some(path) = explicit {
+        return read(path).ok();
+    }
     for path in config_paths() {
         match read(&path) {
             Ok(config) => return Some(config),

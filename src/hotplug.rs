@@ -415,6 +415,8 @@ impl Session {
             river_layer_shell: None,
             river_seat: None,
             layer_shell_seat: None,
+            config_path: None,
+            warned_missing_seat: false,
             wl_seat: None,
             wl_seat_version: 0,
             wl_pointer: None,

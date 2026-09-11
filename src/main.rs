@@ -26,7 +26,60 @@ use wayland_client::{Connection, QueueHandle};
 use crate::app::AppData;
 use crate::wm::WindowManager;
 
+const USAGE: &str = "\
+flume - tiny scrolling window manager for river
+
+usage: flume [-c <path>]
+
+options:
+  -c, --config <path>  read this file instead of searching
+                       $XDG_CONFIG_HOME/flume/config.toml and ~/.config/flume/config.toml
+  -h, --help           print this help and exit
+  -V, --version        print the version and exit
+";
+
+struct Args {
+    config: Option<std::path::PathBuf>,
+}
+
+/// Prints help/version and returns None when the process should exit early.
+fn parse_args() -> Result<Option<Args>, String> {
+    parse_args_from(std::env::args().skip(1))
+}
+
+fn parse_args_from<I: Iterator<Item = String>>(mut args: I) -> Result<Option<Args>, String> {
+    let mut config = None;
+    while let Some(arg) = args.next() {
+        match arg.as_str() {
+            "-c" | "--config" => {
+                let Some(path) = args.next() else {
+                    return Err(format!("{arg} needs a path"));
+                };
+                config = Some(std::path::PathBuf::from(path));
+            }
+            "-h" | "--help" => {
+                print!("{USAGE}");
+                return Ok(None);
+            }
+            "-V" | "--version" => {
+                println!("flume {}", env!("CARGO_PKG_VERSION"));
+                return Ok(None);
+            }
+            other => return Err(format!("unknown argument '{other}'")),
+        }
+    }
+    Ok(Some(Args { config }))
+}
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let args = match parse_args() {
+        Ok(Some(args)) => args,
+        Ok(None) => return Ok(()),
+        Err(message) => {
+            eprintln!("flume: {message}\n{USAGE}");
+            std::process::exit(2);
+        }
+    };
     // Auto-reap children without breaking waitpid() in spawned programs.
     // SA_NOCLDWAIT alone prevents zombies while preserving waitpid()
     // semantics for children that use fork()+waitpid() internally
@@ -54,13 +107,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let qh: QueueHandle<AppData> = event_queue.handle();
     let registry = display.get_registry(&qh, ());
 
-    let config = match config::load() {
-        Ok(config) => config,
-        Err(e) => {
-            eprintln!("Failed to load config: {e}");
-            return Err(e.into());
-        }
-    };
+    let config = config::load(args.config.as_deref())?;
 
     let mut state = AppData {
         registry,
@@ -69,6 +116,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         river_layer_shell: None,
         river_seat: None,
         layer_shell_seat: None,
+        config_path: args.config,
+        warned_missing_seat: false,
         wl_seat: None,
         wl_seat_version: 0,
         wl_pointer: None,
@@ -82,13 +131,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Roundtrip to process the registry globals and bind river interfaces.
     event_queue.roundtrip(&mut state)?;
+    // Required: without them flume cannot manage windows or bind keys. Exit
+    // non-zero so a failed session start is visible to whoever launched it.
     if state.river_wm.is_none() {
-        eprintln!("Failed to find river_window_manager_v1 global");
-        return Ok(());
+        return Err("river_window_manager_v1 global not found".into());
     }
     if state.river_xkb.is_none() {
-        eprintln!("Failed to find river_xkb_bindings_v1 global");
-        return Ok(());
+        return Err("river_xkb_bindings_v1 global not found".into());
+    }
+    if state.river_layer_shell.is_none() {
+        // Optional (rill-ed behaves the same): without it layer-shell focus is
+        // not tracked, so exclusive keyboard focus from a bar is not honored.
+        eprintln!("river_layer_shell_v1 not found: layer-shell focus tracking disabled");
     }
 
     // Don't pass WAYLAND_DEBUG on to children; the added noise makes
@@ -105,4 +159,34 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn args(list: &[&str]) -> Result<Option<Args>, String> {
+        parse_args_from(list.iter().map(|s| s.to_string()))
+    }
+
+    #[test]
+    fn config_path_is_parsed() {
+        let parsed = args(&["-c", "/tmp/x.toml"]).unwrap().unwrap();
+        assert_eq!(parsed.config, Some(std::path::PathBuf::from("/tmp/x.toml")));
+        let parsed = args(&["--config", "/tmp/y.toml"]).unwrap().unwrap();
+        assert_eq!(parsed.config, Some(std::path::PathBuf::from("/tmp/y.toml")));
+        assert!(args(&[]).unwrap().unwrap().config.is_none());
+    }
+
+    #[test]
+    fn help_and_version_exit_early() {
+        assert!(args(&["--help"]).unwrap().is_none());
+        assert!(args(&["-V"]).unwrap().is_none());
+    }
+
+    #[test]
+    fn bad_arguments_are_rejected() {
+        assert!(args(&["--config"]).is_err(), "missing path");
+        assert!(args(&["--nope"]).is_err(), "unknown flag");
+    }
 }

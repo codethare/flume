@@ -43,6 +43,10 @@ pub struct AppData {
     /// wl_seat of the river seat, bound so the window manager can set the
     /// pointer cursor during pointer operations (river-window-management-v1
     /// v4: the WM may set cursor surface/shape without pointer focus).
+    /// Config file given with -c/--config, if any: used for reload too.
+    pub config_path: Option<std::path::PathBuf>,
+    /// The missing-seat warning is worth printing once, not on every manage.
+    pub warned_missing_seat: bool,
     pub wl_seat: Option<WlSeat>,
     /// wl_seat version advertised by the registry, needed to bind it later
     /// from the river seat's `wl_seat` event (which only carries the name).
@@ -250,7 +254,10 @@ pub fn manage(state: &mut AppData) {
         return;
     }
     let Some(seat) = state.river_seat.clone() else {
-        eprintln!("Failed to find seat");
+        if !state.warned_missing_seat {
+            state.warned_missing_seat = true;
+            eprintln!("No seat yet; waiting for river_seat_v1");
+        }
         return;
     };
 

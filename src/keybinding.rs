@@ -831,7 +831,7 @@ fn adjacent_output(
 }
 
 fn reload_config(state: &mut crate::app::AppData) {
-    let Some(new_config) = crate::config::reload() else {
+    let Some(new_config) = crate::config::reload(state.config_path.as_deref()) else {
         eprintln!("Config reload failed — keeping current config");
         return;
     };
