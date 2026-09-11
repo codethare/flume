@@ -14,5 +14,24 @@ jobs:
           components: rustfmt, clippy
       - run: sudo apt-get update && sudo apt-get install -y libxkbcommon-dev pkg-config
       - run: cargo fmt --check
-      - run: cargo clippy --all-targets -- -D warnings
-      - run: cargo test
+      - run: cargo clippy --all-targets --locked -- -D warnings
+      - run: cargo test --locked
+
+  # The declared rust-version is a promise: check it on every push. The
+  # highest rust-version among the dependencies is 1.86.
+  msrv:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.88
+      - run: sudo apt-get update && sudo apt-get install -y libxkbcommon-dev pkg-config
+      - run: cargo check --all-targets --locked
+
+  # The release profile (lto, codegen-units, strip) is only exercised here.
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: sudo apt-get update && sudo apt-get install -y libxkbcommon-dev pkg-config
+      - run: cargo build --release --locked
