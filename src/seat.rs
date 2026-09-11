@@ -184,7 +184,10 @@ pub fn setup_pointer_bindings(state: &mut AppData) {
     };
     for binding in &state.wm.config.pointer_bindings {
         let Ok(mods) = crate::keybinding::parse_modifiers(&binding.modifiers) else {
-            eprintln!("Invalid modifiers: {:?}", binding.modifiers);
+            eprintln!(
+                "flume: invalid modifiers {:?} in pointer binding",
+                binding.modifiers
+            );
             continue;
         };
         let proxy = seat.get_pointer_binding(binding.button.code(), mods, &state.qh, ());

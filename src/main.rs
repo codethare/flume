@@ -142,7 +142,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     if state.river_layer_shell.is_none() {
         // Optional (rill-ed behaves the same): without it layer-shell focus is
         // not tracked, so exclusive keyboard focus from a bar is not honored.
-        eprintln!("river_layer_shell_v1 not found: layer-shell focus tracking disabled");
+        eprintln!("flume: river_layer_shell_v1 missing, layer-shell focus tracking disabled");
     }
 
     // Don't pass WAYLAND_DEBUG on to children; the added noise makes

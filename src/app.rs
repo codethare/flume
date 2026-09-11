@@ -92,7 +92,9 @@ impl Dispatch<WlRegistry, ()> for AppData {
             "river_window_manager_v1" => {
                 const VERSION: u32 = 4;
                 if version < VERSION {
-                    eprintln!("river_window_manager_v1 v{version}, need at least v{VERSION}");
+                    eprintln!(
+                        "flume: river_window_manager_v1 v{version}, need at least v{VERSION}"
+                    );
                     std::process::exit(1);
                 }
                 state.river_wm = Some(registry.bind(name, VERSION, qh, ()));
@@ -100,7 +102,7 @@ impl Dispatch<WlRegistry, ()> for AppData {
             "river_xkb_bindings_v1" => {
                 const VERSION: u32 = 1;
                 if version < VERSION {
-                    eprintln!("river_xkb_bindings_v1 v{version}, need at least v{VERSION}");
+                    eprintln!("flume: river_xkb_bindings_v1 v{version}, need at least v{VERSION}");
                     std::process::exit(1);
                 }
                 state.river_xkb = Some(registry.bind(name, VERSION, qh, ()));
@@ -108,7 +110,7 @@ impl Dispatch<WlRegistry, ()> for AppData {
             "river_layer_shell_v1" => {
                 const VERSION: u32 = 1;
                 if version < VERSION {
-                    eprintln!("river_layer_shell_v1 v{version}, need at least v{VERSION}");
+                    eprintln!("flume: river_layer_shell_v1 v{version}, need at least v{VERSION}");
                     std::process::exit(1);
                 }
                 state.river_layer_shell = Some(registry.bind(name, VERSION, qh, ()));
@@ -135,7 +137,7 @@ impl Dispatch<RiverWindowManagerV1, ()> for AppData {
         use crate::river::river_window_manager_v1::Event;
         match event {
             Event::Unavailable => {
-                eprintln!("Error: another WM is already running");
+                eprintln!("flume: another window manager is already running for this session");
                 std::process::exit(1);
             }
             Event::Finished => {
@@ -256,7 +258,7 @@ pub fn manage(state: &mut AppData) {
     let Some(seat) = state.river_seat.clone() else {
         if !state.warned_missing_seat {
             state.warned_missing_seat = true;
-            eprintln!("No seat yet; waiting for river_seat_v1");
+            eprintln!("flume: no seat yet, waiting for river_seat_v1");
         }
         return;
     };

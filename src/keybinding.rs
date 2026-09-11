@@ -194,7 +194,7 @@ pub fn setup_keybindings(state: &mut crate::app::AppData) {
         binding.proxy.destroy();
     }
     let Some(xkb_bindings) = state.river_xkb.clone() else {
-        eprintln!("Failed to find xkb bindings");
+        eprintln!("flume: river_xkb_bindings_v1 missing, no keybindings");
         return;
     };
     let Some(seat) = state.river_seat.clone() else {
@@ -202,11 +202,14 @@ pub fn setup_keybindings(state: &mut crate::app::AppData) {
     };
     for kb in &state.wm.config.keybindings {
         let Some(keysym) = parse_key(&kb.key) else {
-            eprintln!("Failed to parse key '{}'", kb.key);
+            eprintln!("flume: unknown keysym '{}'", kb.key);
             continue;
         };
         let Ok(mods) = parse_modifiers(&kb.modifiers) else {
-            eprintln!("Invalid modifiers {:?} for key '{}'", kb.modifiers, kb.key);
+            eprintln!(
+                "flume: invalid modifiers {:?} for key '{}'",
+                kb.modifiers, kb.key
+            );
             continue;
         };
         let proxy = xkb_bindings.get_xkb_binding(&seat, keysym, mods, &state.qh, ());
@@ -834,7 +837,7 @@ fn adjacent_output(
 
 fn reload_config(state: &mut crate::app::AppData) {
     let Some(new_config) = crate::config::reload(state.config_path.as_deref()) else {
-        eprintln!("Config reload failed — keeping current config");
+        eprintln!("flume: config reload failed, keeping the running config");
         return;
     };
     state.wm.config = std::rc::Rc::new(new_config);
