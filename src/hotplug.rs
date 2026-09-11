@@ -660,6 +660,7 @@ fn build() -> (Session, MiniServer) {
 // ---------------------------------------------------------------------------
 
 mod cursor;
+mod keybindings;
 mod manage;
 mod outputs;
 mod overview;
