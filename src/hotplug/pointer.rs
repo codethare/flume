@@ -32,7 +32,7 @@ fn pointer_enter_focus_follows_toggle() {
     };
 
     // Toggle off: hover changes nothing.
-    s.state.wm.config.focus_follows_pointer = false;
+    s.config_mut().focus_follows_pointer = false;
     s.send(
         &mut sv,
         seat.clone(),
@@ -47,7 +47,7 @@ fn pointer_enter_focus_follows_toggle() {
     );
 
     // Toggle on: hovering the other window refocuses it.
-    s.state.wm.config.focus_follows_pointer = true;
+    s.config_mut().focus_follows_pointer = true;
     s.send(
         &mut sv,
         seat,

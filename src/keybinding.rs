@@ -835,7 +835,7 @@ fn reload_config(state: &mut crate::app::AppData) {
         eprintln!("Config reload failed — keeping current config");
         return;
     };
-    state.wm.config = new_config;
+    state.wm.config = std::rc::Rc::new(new_config);
 
     if let Some(cursor) = state.wm.config.cursor.clone()
         && let Some(seat) = &state.river_seat

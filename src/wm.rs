@@ -24,7 +24,9 @@ pub enum LayerShellFocus {
 }
 
 pub struct WindowManager {
-    pub config: Config,
+    /// Shared so layout passes take a refcount bump instead of cloning the
+    /// whole config (bindings, rules) on every manage cycle.
+    pub config: std::rc::Rc<Config>,
     pub outputs: Vec<Output>,
     pub focused_output_idx: Option<usize>,
     pub previous_workspace: Option<OverviewHome>,
@@ -54,7 +56,7 @@ pub struct WindowManager {
 impl WindowManager {
     pub fn new(config: Config) -> WindowManager {
         WindowManager {
-            config,
+            config: std::rc::Rc::new(config),
             outputs: Vec::new(),
             focused_output_idx: None,
             previous_workspace: None,

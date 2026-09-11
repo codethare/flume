@@ -532,6 +532,11 @@ impl Session {
         );
     }
 
+    /// Test-only config override: `Rc::make_mut` copies only while shared.
+    fn config_mut(&mut self) -> &mut crate::types::Config {
+        std::rc::Rc::make_mut(&mut self.state.wm.config)
+    }
+
     fn manage(&mut self, server: &mut MiniServer) {
         self.send(server, server.wm.clone().unwrap(), EVT_MANAGE_START, vec![]);
     }
