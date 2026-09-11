@@ -257,13 +257,15 @@ impl MiniServer {
         let children = Arc::new(Mutex::new(Vec::new()));
         let requests = Arc::new(Mutex::new(Vec::new()));
         // Globals advertised to every registry the client creates, in bind order.
+        // The wm and xkb versions must match the VERSION constants in app.rs:
+        // if flume's floor moves past them, the client exits and the tests fail.
         let globals: [(
             &'static wayland_backend::protocol::Interface,
             u32,
             &'static str,
         ); 5] = [
-            (&RIVER_WINDOW_MANAGER_V1_INTERFACE, 4, "wm"),
-            (&RIVER_XKB_BINDINGS_V1_INTERFACE, 1, "xkb"),
+            (&RIVER_WINDOW_MANAGER_V1_INTERFACE, 5, "wm"),
+            (&RIVER_XKB_BINDINGS_V1_INTERFACE, 3, "xkb"),
             (&RIVER_LAYER_SHELL_V1_INTERFACE, 1, "ls"),
             // Bound by the client only once river_seat_v1.wl_seat names it.
             (&WL_SEAT_INTERFACE, 9, "wl_seat"),

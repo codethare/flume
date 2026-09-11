@@ -120,6 +120,10 @@ pub fn output_event(
 
             true // manage_dirty: migrate/detach inside the manage sequence
         }
+        // river >= 0.4.6 reports how many capture sessions target this output;
+        // not used yet (staying awake while captured, or not switching
+        // workspaces on a captured output, would read it).
+        river_output_v1::Event::CaptureSessions { .. } => false,
     }
 }
 

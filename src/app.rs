@@ -90,7 +90,7 @@ impl Dispatch<WlRegistry, ()> for AppData {
         };
         match interface.as_str() {
             "river_window_manager_v1" => {
-                const VERSION: u32 = 4;
+                const VERSION: u32 = 5;
                 if version < VERSION {
                     eprintln!(
                         "flume: river_window_manager_v1 v{version}, need at least v{VERSION}"
@@ -100,7 +100,7 @@ impl Dispatch<WlRegistry, ()> for AppData {
                 state.river_wm = Some(registry.bind(name, VERSION, qh, ()));
             }
             "river_xkb_bindings_v1" => {
-                const VERSION: u32 = 1;
+                const VERSION: u32 = 3;
                 if version < VERSION {
                     eprintln!("flume: river_xkb_bindings_v1 v{version}, need at least v{VERSION}");
                     std::process::exit(1);

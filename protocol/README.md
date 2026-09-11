@@ -10,32 +10,34 @@ These XML files are vendored unmodified from the river compositor
 build time by `wayland-scanner` (see `src/river.rs`), so changing them changes
 the generated client API and can require handler updates in `src/`.
 
-The vendored state matches river
-[`ffcaf28`](https://codeberg.org/river/river/commit/ffcaf28) (2026-03-10):
+The vendored state matches the river release
+[`v0.4.8`](https://codeberg.org/river/river/releases/tag/v0.4.8) (commit
+[`b028abc`](https://codeberg.org/river/river/commit/b028abcff33ed7a42ee222dce1abe71c06d3e41a),
+2026-08-07), which is also the surface of `main` for these files:
 
-| File | Matches | Upstream commits since |
+| File | Interface versions | Upstream drift |
 |---|---|---|
-| `river-window-management-v1.xml` | `ffcaf28` | 11 |
-| `river-xkb-bindings-v1.xml` | the revision before `65947fe` (2026-04-22) | 2 |
-| `river-layer-shell-v1.xml` | current `main` | 0 |
+| `river-window-management-v1.xml` | v5 | none |
+| `river-xkb-bindings-v1.xml` | v3 | none |
+| `river-layer-shell-v1.xml` | v1 | none |
 
-The drift is almost entirely documentation. The only interface additions
-upstream are `river_window_v1.capture_sessions` and
-`river_output_v1.capture_sessions` (since 5: counts of active
-ext-image-copy-capture sessions) and, in the xkb protocol,
-`river_xkb_bindings_seat_v1.modifiers_watch` / `modifiers_update` (since 3).
-Every window management interface moved v4 → v5 and the xkb ones v2 → v3, so
-using any of this also means raising the bind versions in `src/app.rs` and
-running a river new enough to serve them.
+flume binds `river_window_manager_v1` at v5 and `river_xkb_bindings_v1` at v3
+(`src/app.rs`), so the running river must be **0.4.6 or newer**. Two API
+additions come with them and are vendored but deliberately unused for now:
+`river_window_v1`/`river_output_v1.capture_sessions` (counts of active
+ext-image-copy-capture sessions, e.g. for staying awake while captured) and
+`river_xkb_bindings_seat_v1.modifiers_{watch,update}` (modifier state changes
+before the next input event, e.g. for a mod-key overlay). `src/window.rs` and
+`src/output.rs` carry explicit no-op arms for the capture events.
 
 Verified by blob equality rather than by date, e.g. for the window management
 protocol:
 
 ```sh
 git hash-object protocol/river-window-management-v1.xml
-# 608225dd5f47e4feb5875742392d501f754b2dea
-git -C <river clone> log --all --find-object=608225dd5f47e4feb5875742392d501f754b2dea
-# ffcaf28 added this blob, c1771ae replaced it
+# 039a9b65a2e41df220dc2b93d7fa545e26a1c898
+git -C <river clone> log --all --find-object=039a9b65a2e41df220dc2b93d7fa545e26a1c898
+# the commit carrying the v0.4.8 protocol
 ```
 
 ## Refreshing

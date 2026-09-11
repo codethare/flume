@@ -38,6 +38,9 @@ cargo build --release
 river -c ./target/release/flume
 ```
 
+Requires river **0.4.6 or newer** (flume binds `river_window_manager_v1` v5 and
+`river_xkb_bindings_v1` v3).
+
 flume itself takes `-c/--config <path>` to read a specific config file,
 `--help` and `--version`.
 

@@ -130,6 +130,10 @@ pub fn window_event(
                         .geom
                         .is_fullscreen = false;
                 }
+                // river >= 0.4.6 reports how many capture sessions target this
+                // window; not used yet (a recording indicator or a policy for
+                // hidden windows would read it).
+                river_window_v1::Event::CaptureSessions { .. } => {}
                 _ => return false,
             }
             layout::update(&mut state.wm);
