@@ -67,6 +67,8 @@ const EVT_OUT_DIMENSIONS: u16 = 3;
 // dimensions=2, app_id=3, ... fullscreen_requested=12, exit_fullscreen_requested=13)
 const EVT_WIN_CLOSED: u16 = 0;
 const EVT_WIN_DIMENSIONS: u16 = 2;
+const EVT_WIN_APP_ID: u16 = 3;
+const EVT_WIN_TITLE: u16 = 4;
 const EVT_WIN_FULLSCREEN_REQUESTED: u16 = 12;
 const EVT_WIN_EXIT_FULLSCREEN_REQUESTED: u16 = 13;
 // river_xkb_binding_v1 events (pressed=0, released=1) and requests
@@ -613,8 +615,10 @@ impl Session {
         out
     }
 
-    /// Map a window on the currently focused output/workspace.
-    fn add_window(&mut self, server: &mut MiniServer) -> ObjectId {
+    /// Create a window object without announcing dimensions: it stays
+    /// pending until `map_window`, which is where river sends app_id/title
+    /// (before dimensions), and where flume evaluates window rules.
+    fn add_pending_window(&mut self, server: &mut MiniServer) -> ObjectId {
         let win = server.create_object(&RIVER_WINDOW_V1_INTERFACE);
         self.send(
             server,
@@ -622,12 +626,24 @@ impl Session {
             EVT_WINDOW,
             vec![Argument::NewId(win.clone())],
         );
+        win
+    }
+
+    /// Announce dimensions, which maps the window (window.rs adds it on this
+    /// event, not during a manage sequence).
+    fn map_window(&mut self, server: &mut MiniServer, win: &ObjectId) {
         self.send(
             server,
             win.clone(),
             EVT_WIN_DIMENSIONS,
             vec![Argument::Int(800), Argument::Int(600)],
         );
+    }
+
+    /// Map a window on the currently focused output/workspace.
+    fn add_window(&mut self, server: &mut MiniServer) -> ObjectId {
+        let win = self.add_pending_window(server);
+        self.map_window(server, &win);
         win
     }
 
@@ -672,6 +688,7 @@ mod manage;
 mod outputs;
 mod overview;
 mod pointer;
+mod rules;
 mod windows;
 
 /// Requests with the given opcode seen on `object`.
