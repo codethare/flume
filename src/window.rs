@@ -8,7 +8,7 @@ use wayland_client::{Dispatch, Proxy, QueueHandle};
 use crate::app::AppData;
 use crate::layout::{self, common};
 use crate::river::river_window_v1::{self, RiverWindowV1};
-use crate::types::{Layout, PendingWindow, Status, Window, WindowGeom};
+use crate::types::{PendingWindow, Status, Window, WindowGeom};
 use crate::wm::WindowManager;
 
 /// Handle a river_window_v1 event. Returns true when a manage sequence
@@ -229,7 +229,7 @@ fn add_window(
     // New windows start just off the right edge (or at the centered floating
     // rect) so the first manage pass moves them into place.
     let rightmost = common::initial_rectangle(output.non_exclusive, &config);
-    let floating_rect = if workspace.layout == Layout::Floating || is_floating {
+    let floating_rect = if is_floating {
         common::center_rectangle(output.non_exclusive, &config)
     } else {
         rightmost

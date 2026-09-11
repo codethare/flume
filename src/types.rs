@@ -91,18 +91,9 @@ pub struct Window {
     pub geom: WindowGeom,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum Layout {
-    #[default]
-    Scroller,
-    Floating,
-}
-
 pub struct Workspace {
     pub window_list: Vec<Window>,
     pub focused_window_idx: Option<usize>,
-    pub is_floating: bool,
-    pub layout: Layout,
 }
 
 impl Workspace {
@@ -110,8 +101,6 @@ impl Workspace {
         Workspace {
             window_list: Vec::new(),
             focused_window_idx: None,
-            is_floating: false,
-            layout: Layout::Scroller,
         }
     }
 

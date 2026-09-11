@@ -361,14 +361,6 @@ pub fn dispatch_action(state: &mut crate::app::AppData, action: &KeybindingActio
             }
         }
         A::ToggleMaximizeColumn => {
-            if state
-                .wm
-                .workspace(output_idx, workspace_idx)
-                .unwrap()
-                .is_floating
-            {
-                return;
-            }
             if let Some(window) = state.wm.focused_window_mut() {
                 window.geom.proportion = if window.geom.proportion == 1.0 {
                     0.5
@@ -459,14 +451,6 @@ pub fn dispatch_action(state: &mut crate::app::AppData, action: &KeybindingActio
             }
         }
         A::FocusWindowLeft => {
-            if state
-                .wm
-                .workspace(output_idx, workspace_idx)
-                .unwrap()
-                .is_floating
-            {
-                return;
-            }
             let workspace = state.wm.workspace_mut(output_idx, workspace_idx).unwrap();
             let Some(window_idx) = workspace.focused_window_idx else {
                 return;
@@ -477,14 +461,6 @@ pub fn dispatch_action(state: &mut crate::app::AppData, action: &KeybindingActio
             workspace.focused_window_idx = Some(window_idx - 1);
         }
         A::FocusWindowRight => {
-            if state
-                .wm
-                .workspace(output_idx, workspace_idx)
-                .unwrap()
-                .is_floating
-            {
-                return;
-            }
             let workspace = state.wm.workspace_mut(output_idx, workspace_idx).unwrap();
             let Some(window_idx) = workspace.focused_window_idx else {
                 return;
@@ -506,9 +482,9 @@ pub fn dispatch_action(state: &mut crate::app::AppData, action: &KeybindingActio
                 return;
             }
             let at_edge = if right {
-                workspace.is_floating || window_idx == workspace.window_list.len() - 1
+                window_idx == workspace.window_list.len() - 1
             } else {
-                workspace.is_floating || window_idx == 0
+                window_idx == 0
             };
             let redirect = if right {
                 KeybindingAction::FocusOutputRight

@@ -7,12 +7,11 @@
 //! commits them immediately (`current = finish`).
 
 pub mod common;
-pub mod floating;
 pub mod scroller;
 
 use crate::river::river_seat_v1::RiverSeatV1;
 use crate::river::wayland_client::Proxy;
-use crate::types::{Color, DetachedOutput, Layout, Window, WindowGeom};
+use crate::types::{Color, DetachedOutput, Window, WindowGeom};
 use crate::wm::{LayerShellFocus, WindowManager};
 
 /// Recompute layout targets for every output/workspace. Pure state
@@ -55,17 +54,14 @@ pub fn update(wm: &mut WindowManager) {
                 .iter()
                 .map(|w| w.geom.clone())
                 .collect();
-            match workspace.layout {
-                Layout::Floating => floating::apply(&mut geoms, output.rectangle, y_offset),
-                Layout::Scroller => scroller::apply(
-                    &mut geoms,
-                    workspace.focused_window_idx,
-                    output.rectangle,
-                    output.non_exclusive,
-                    &config,
-                    y_offset,
-                ),
-            }
+            scroller::apply(
+                &mut geoms,
+                workspace.focused_window_idx,
+                output.rectangle,
+                output.non_exclusive,
+                &config,
+                y_offset,
+            );
             for (window, geom) in workspace.window_list.iter_mut().zip(geoms) {
                 window.geom = geom;
             }
