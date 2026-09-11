@@ -38,6 +38,9 @@ cargo build --release
 river -c ./target/release/flume
 ```
 
+flume itself takes `-c/--config <path>` to read a specific config file,
+`--help` and `--version`.
+
 ## Configuration
 
 Config is searched at, in order:
@@ -72,6 +75,10 @@ silently ignored.
 | `cursor.theme`, `cursor.size` | | XCursor theme and size (omit for the default cursor) |
 | `spawn_at_startup` | `[]` | Commands spawned detached at startup |
 | `window_rules` | `[]` | Match by `app_id` and/or glob `title`; matched windows float |
+
+Rules are evaluated when a window is first mapped, so `Super+r` does not
+re-evaluate them for already-open windows (matching rill-ed) — a window you
+floated by hand stays floated.
 
 ### Default keybindings
 

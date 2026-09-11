@@ -29,6 +29,8 @@ unfocused_color = { r = 160, g = 160, b = 160, a = 1.0 }
 
 # Rules matching windows by exact app_id and/or glob title (`*`, `?`).
 # All set fields must match. Matched windows are forced floating.
+# Evaluated when a window is first mapped: reloading the config does not
+# re-evaluate rules for windows that are already open.
 # [[window_rules]]
 # app_id = "footclient"
 # floating = true
