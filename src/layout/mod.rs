@@ -9,10 +9,20 @@
 pub mod common;
 pub mod scroller;
 
+mod focus;
+mod migrate;
+
+pub use focus::apply_window_border;
+use focus::{apply_focus_and_borders, raise_floating_windows};
+use migrate::{
+    detach_output, exit_fullscreen_and_close_closing, fixup_indices_after_output_removal,
+    migrate_detached_into, migrate_output_windows, migrate_windows_by_name, reset_sent_caches,
+};
+
 use crate::river::river_seat_v1::RiverSeatV1;
 use crate::river::wayland_client::Proxy;
-use crate::types::{Color, DetachedOutput, Window, WindowGeom};
-use crate::wm::{LayerShellFocus, WindowManager};
+use crate::types::{Window, WindowGeom};
+use crate::wm::WindowManager;
 
 /// Recompute layout targets for every output/workspace. Pure state
 /// computation; no protocol requests.
@@ -253,305 +263,6 @@ pub fn apply(wm: &mut WindowManager, seat: &RiverSeatV1) {
     }
 }
 
-fn reset_sent_caches(geom: &mut WindowGeom) {
-    geom.sent_visible = None;
-    geom.sent_current = None;
-    geom.sent_clip = None;
-    geom.sent_border_focused = None;
-    geom.sent_border_width = None;
-}
-
-fn exit_fullscreen_and_close_closing(wm: &mut WindowManager, output_idx: usize) {
-    let output_rect = wm.outputs[output_idx].rectangle;
-    for workspace in &mut wm.outputs[output_idx].workspace_list {
-        for window in &mut workspace.window_list {
-            // Windows sitting at (or near) the fullscreen rect still hold
-            // compositor-side fullscreen; release it. Over-calling
-            // exit_fullscreen is a no-op, so bias toward calling.
-            let pos = window.geom.current;
-            let at_fullscreen_rect = window.geom.is_fullscreen
-                || ((pos.x - output_rect.x).abs() <= 4
-                    && (pos.y - output_rect.y).abs() <= 4
-                    && (pos.width - output_rect.width).abs() <= 4
-                    && (pos.height - output_rect.height).abs() <= 4);
-            if at_fullscreen_rect {
-                window.river_window.exit_fullscreen();
-            }
-            if window.geom.is_closing {
-                window.river_window.close();
-            }
-        }
-    }
-}
-
-/// Migrate all windows of a removed output to a surviving output,
-/// workspace-by-workspace. Must run inside the manage sequence; the event
-/// handler only sets is_removed.
-fn migrate_output_windows(wm: &mut WindowManager, removed_idx: usize, survivor_idx: usize) {
-    let src_name = wm.outputs[removed_idx].name.clone();
-    let mut src_workspaces = std::mem::take(&mut wm.outputs[removed_idx].workspace_list);
-    {
-        let target = &mut wm.outputs[survivor_idx];
-        for (src_ws, dst_ws) in src_workspaces
-            .iter_mut()
-            .zip(target.workspace_list.iter_mut())
-        {
-            for mut window in src_ws.window_list.drain(..) {
-                if window.geom.is_fullscreen {
-                    window.river_window.exit_fullscreen();
-                }
-                window.geom.former_output_name = src_name.clone();
-                dst_ws.window_list.push(window);
-                if dst_ws.focused_window_idx.is_none() {
-                    dst_ws.focused_window_idx = Some(dst_ws.window_list.len() - 1);
-                }
-            }
-            src_ws.focused_window_idx = None;
-        }
-    }
-    wm.outputs[removed_idx].workspace_list = src_workspaces;
-}
-
-/// Preserve a removed output's workspaces keyed by its name. Any previously
-/// detached entry under the same name is closed out.
-fn detach_output(wm: &mut WindowManager, removed_idx: usize) {
-    let Some(name) = wm.outputs[removed_idx].name.clone() else {
-        return; // no name: windows stay in the output for the cleanup pass
-    };
-    let detached = DetachedOutput {
-        workspace_list: std::mem::take(&mut wm.outputs[removed_idx].workspace_list),
-        focused_workspace_idx: wm.outputs[removed_idx].focused_workspace_idx,
-    };
-    if let Some(old) = wm.detached_outputs.insert(name, detached) {
-        for workspace in old.workspace_list {
-            for window in workspace.window_list {
-                window.river_window.close();
-            }
-        }
-    }
-}
-
-/// Move a detached output's windows into the fallback output's matching
-/// workspaces, tagging them with the detached output's name so they can
-/// return if it reappears.
-fn migrate_detached_into(
-    wm: &mut WindowManager,
-    target_idx: usize,
-    key: &str,
-    detached: DetachedOutput,
-) {
-    let mut detached = detached;
-    {
-        let target = &mut wm.outputs[target_idx];
-        for (src_ws, dst_ws) in detached
-            .workspace_list
-            .iter_mut()
-            .zip(target.workspace_list.iter_mut())
-        {
-            for mut window in src_ws.window_list.drain(..) {
-                if window.geom.is_fullscreen {
-                    window.river_window.exit_fullscreen();
-                }
-                if window.geom.former_output_name.is_none() {
-                    window.geom.former_output_name = Some(key.to_string());
-                }
-                dst_ws.window_list.push(window);
-                if dst_ws.focused_window_idx.is_none() {
-                    dst_ws.focused_window_idx = Some(dst_ws.window_list.len() - 1);
-                }
-            }
-        }
-    }
-}
-
-/// Move windows whose former_output_name matches `dst_name` from src to dst.
-/// Returns true if anything moved. Replicates rill-ed's focus-index fixup.
-fn migrate_windows_by_name(
-    wm: &mut WindowManager,
-    src_idx: usize,
-    dst_idx: usize,
-    ws_idx: usize,
-    dst_name: &str,
-) -> bool {
-    let src_list = std::mem::take(&mut wm.outputs[src_idx].workspace_list[ws_idx].window_list);
-    let src_focus = wm.outputs[src_idx].workspace_list[ws_idx].focused_window_idx;
-
-    let mut moved: Vec<Window> = Vec::new();
-    let mut kept: Vec<Window> = Vec::new();
-    let mut removed_idxs: Vec<usize> = Vec::new();
-    for (i, mut window) in src_list.into_iter().enumerate() {
-        if window.geom.former_output_name.as_deref() == Some(dst_name) {
-            window.geom.former_output_name = None;
-            removed_idxs.push(i);
-            moved.push(window);
-        } else {
-            kept.push(window);
-        }
-    }
-    if moved.is_empty() {
-        wm.outputs[src_idx].workspace_list[ws_idx].window_list = kept;
-        return false;
-    }
-
-    // rill-ed removes indices in descending order and fixes up focus per
-    // removal; apply the same rule over the same order.
-    let mut focus = src_focus;
-    for &i in removed_idxs.iter().rev() {
-        if let Some(f) = focus
-            && f >= i
-        {
-            focus = if f > 0 { Some(f - 1) } else { None };
-        }
-    }
-
-    // Insert at the front in reverse so the moved windows keep their
-    // original relative order at the destination.
-    {
-        let dst_ws = &mut wm.outputs[dst_idx].workspace_list[ws_idx];
-        for window in moved.into_iter().rev() {
-            dst_ws.window_list.insert(0, window);
-        }
-        if dst_ws.focused_window_idx.is_none() {
-            dst_ws.focused_window_idx = Some(0);
-        }
-    }
-
-    let src_ws = &mut wm.outputs[src_idx].workspace_list[ws_idx];
-    src_ws.window_list = kept;
-    src_ws.focused_window_idx = focus;
-    true
-}
-
-/// Fixup `focused` after `removed_idx` is swap-removed from a list of
-/// `old_len` entries (rill-ed layout.zig, unit-tested there too).
-fn fixup_indices_after_output_removal(
-    focused: &mut Option<usize>,
-    removed_idx: usize,
-    old_len: usize,
-) {
-    if let Some(foi) = *focused {
-        if foi == removed_idx {
-            if old_len > 1 {
-                *focused = Some(removed_idx.min(old_len - 2));
-            } else {
-                *focused = None;
-            }
-        } else if foi > removed_idx {
-            *focused = Some(foi - 1);
-        }
-    }
-}
-
-/// Set border colors and keyboard focus to match the current focused
-/// window/output. Safe to call every manage pass: redundant border and focus
-/// requests are skipped so IME clients (fcitx5) are not disrupted.
-pub fn apply_focus_and_borders(wm: &mut WindowManager, seat: &RiverSeatV1) {
-    let Some(foi) = wm.focused_output_idx else {
-        return;
-    };
-    let config = wm.config.clone();
-
-    // While overview is active the highlighted grid slot is the focused
-    // window; it lives at its home location, not in any single workspace.
-    let ov_highlighted: Option<crate::river::river_window_v1::RiverWindowV1> = wm
-        .overview_state
-        .as_ref()
-        .filter(|ov| ov.highlighted < ov.entries.len())
-        .and_then(|ov| wm.locate_window(&ov.entries[ov.highlighted].window))
-        .and_then(|(oi, wi, wi2)| {
-            wm.outputs
-                .get(oi)?
-                .workspace_list
-                .get(wi)?
-                .window_list
-                .get(wi2)
-                .map(|w| w.river_window.clone())
-        });
-
-    for (output_idx, output) in wm.outputs.iter_mut().enumerate() {
-        if output.is_removed {
-            continue;
-        }
-        let focused_ws = output.focused_workspace_idx;
-        let is_focused_output = output_idx == foi;
-        for (workspace_idx, workspace) in output.workspace_list.iter_mut().enumerate() {
-            let ws_focus = workspace.focused_window_idx;
-            for (window_idx, window) in workspace.window_list.iter_mut().enumerate() {
-                let is_focused = if wm.overview_state.is_some() {
-                    ov_highlighted.as_ref() == Some(&window.river_window)
-                } else {
-                    is_focused_output && workspace_idx == focused_ws && Some(window_idx) == ws_focus
-                };
-
-                let Window {
-                    river_window,
-                    river_node,
-                    geom,
-                } = window;
-                apply_window_border(river_window, geom, is_focused, &config);
-
-                if !is_focused {
-                    continue;
-                }
-                river_node.place_top();
-            }
-        }
-
-        if !is_focused_output {
-            continue;
-        }
-        if let Some(layer_shell_output) = &output.river_layer_shell_output {
-            layer_shell_output.set_default();
-        }
-    }
-
-    // Only send focus commands when the target actually changes.
-    if wm.layer_shell_focus == LayerShellFocus::Exclusive {
-        return;
-    }
-    // Skip focus management while the session is locked; the lock surface
-    // has exclusive keyboard focus managed by the compositor.
-    if wm.session_locked {
-        return;
-    }
-
-    let desired_focus: Option<crate::river::river_window_v1::RiverWindowV1> =
-        if wm.overview_state.is_some() {
-            ov_highlighted
-        } else {
-            let output = &wm.outputs[foi];
-            let workspace = &output.workspace_list[output.focused_workspace_idx];
-            workspace
-                .focused_window_idx
-                .and_then(|fwi| workspace.window_list.get(fwi))
-                .map(|w| w.river_window.clone())
-        };
-
-    if desired_focus != wm.last_focused_window {
-        if let Some(window) = &desired_focus {
-            seat.focus_window(window);
-        } else if wm.layer_shell_focus != LayerShellFocus::NonExclusive {
-            seat.clear_focus();
-        }
-        wm.last_focused_window = desired_focus;
-    }
-}
-
-/// Raise every floating window above all tiled windows. river commits the
-/// render list atomically at render_finish and skips reorder work when the
-/// order is unchanged, so re-issuing on every manage pass is free.
-pub fn raise_floating_windows(wm: &mut WindowManager) {
-    for output in &mut wm.outputs {
-        for workspace in &mut output.workspace_list {
-            for window in &mut workspace.window_list {
-                if window.geom.is_floating {
-                    window.river_node.place_top();
-                }
-            }
-        }
-    }
-}
-
 /// Commit layout targets immediately (no animation): current = finish.
 pub fn snap_to_finish(wm: &mut WindowManager) {
     let config = wm.config.clone();
@@ -613,57 +324,11 @@ pub fn snap_to_finish(wm: &mut WindowManager) {
     }
 }
 
-pub fn apply_window_border(
-    river_window: &crate::river::river_window_v1::RiverWindowV1,
-    geom: &mut WindowGeom,
-    is_focused: bool,
-    config: &crate::types::Config,
-) {
-    // Fullscreen windows fill their output rect exactly (place_window uses
-    // border 0 for them); any border would be drawn by the compositor beyond
-    // the rect, spilling onto a neighboring monitor's adjoining edge. Suppress
-    // borders for fullscreen like place_window does.
-    let width = if geom.is_fullscreen {
-        0
-    } else {
-        config.border.width
-    };
-    // Dedup against sent state; if unchanged, skip the request.
-    let need =
-        geom.sent_border_focused != Some(is_focused) || geom.sent_border_width != Some(width);
-    if !need {
-        return;
-    }
-    let color = if is_focused {
-        color_to_river(config.border.focused_color)
-    } else {
-        color_to_river(config.border.unfocused_color)
-    };
-    river_window.set_borders(
-        common::edges_all(),
-        width as i32,
-        color.0,
-        color.1,
-        color.2,
-        color.3,
-    );
-    geom.sent_border_focused = Some(is_focused);
-    geom.sent_border_width = Some(width);
-}
-
-/// Convert a config color to river's 32-bit channel values.
-pub fn color_to_river(c: Color) -> (u32, u32, u32, u32) {
-    let max = u32::MAX as f64;
-    let r = (c.a * c.r as f32 / 255.0) as f64 * max;
-    let g = (c.a * c.g as f32 / 255.0) as f64 * max;
-    let b = (c.a * c.b as f32 / 255.0) as f64 * max;
-    let a = c.a as f64 * max;
-    (r as u32, g as u32, b as u32, a as u32)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::layout::focus::color_to_river;
+    use crate::types::Color;
 
     #[test]
     fn focused_output_idx_stays_valid_after_swap_remove() {
