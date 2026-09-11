@@ -176,3 +176,91 @@ fn closing_windows_prunes_the_overview_and_releases_the_grabs() {
     );
     s.check_consistent();
 }
+
+/// The overview hides fullscreen windows into grid cells; leaving it must
+/// restore them. `was_fullscreen` was untested — and it sits in the same
+/// `exit_overview` path that the prune bug used to skip entirely.
+#[test]
+fn fullscreen_is_restored_after_cancelling_the_overview() {
+    let (mut s, mut sv) = build();
+    s.add_seat(&mut sv);
+    s.manage(&mut sv);
+    s.add_output(&mut sv, "A", (0, 0), (1920, 1080));
+    s.manage(&mut sv);
+    s.add_window(&mut sv);
+    s.manage(&mut sv);
+    crate::keybinding::dispatch_action(&mut s.state, &KeybindingAction::ToggleFullscreen);
+    s.manage(&mut sv);
+    assert!(
+        s.state.wm.outputs[0].workspace_list[0].window_list[0]
+            .geom
+            .is_fullscreen
+    );
+
+    crate::keybinding::dispatch_action(&mut s.state, &KeybindingAction::EnterOverview);
+    s.manage(&mut sv);
+    let ov = s.state.wm.overview_state.as_ref().expect("overview open");
+    assert!(
+        ov.entries[0].was_fullscreen,
+        "the overview must remember the window was fullscreen"
+    );
+    assert!(
+        !s.state.wm.outputs[0].workspace_list[0].window_list[0]
+            .geom
+            .is_fullscreen,
+        "the grid cell is not a fullscreen state"
+    );
+
+    press(&mut s, &mut sv, KeybindingAction::OverviewCancel);
+    s.manage(&mut sv);
+    assert!(s.state.wm.overview_state.is_none());
+    assert!(
+        s.state.wm.outputs[0].workspace_list[0].window_list[0]
+            .geom
+            .is_fullscreen,
+        "cancelling must restore the fullscreen window"
+    );
+    s.check_consistent();
+}
+
+/// Confirming another grid slot also restores the fullscreen window the
+/// overview had put into a cell.
+#[test]
+fn fullscreen_is_restored_after_confirming_another_window() {
+    let (mut s, mut sv) = build();
+    s.add_seat(&mut sv);
+    s.manage(&mut sv);
+    s.add_output(&mut sv, "A", (0, 0), (1920, 1080));
+    s.manage(&mut sv);
+    s.add_window(&mut sv); // entries[0], made fullscreen
+    s.manage(&mut sv);
+    crate::keybinding::dispatch_action(&mut s.state, &KeybindingAction::ToggleFullscreen);
+    s.manage(&mut sv);
+    s.add_window(&mut sv); // entries[1], focused
+    s.manage(&mut sv);
+
+    crate::keybinding::dispatch_action(&mut s.state, &KeybindingAction::EnterOverview);
+    s.manage(&mut sv);
+    assert_eq!(entry_count(&s), 2);
+    assert!(s.state.wm.overview_state.as_ref().unwrap().entries[0].was_fullscreen);
+
+    // Highlight the other window and confirm it.
+    press(&mut s, &mut sv, KeybindingAction::OverviewNavRight);
+    assert_eq!(highlight(&s), 1);
+    press(&mut s, &mut sv, KeybindingAction::OverviewConfirm);
+    s.manage(&mut sv);
+
+    assert!(s.state.wm.overview_state.is_none());
+    assert_eq!(
+        s.state.wm.outputs[0].workspace_list[0].focused_window_idx,
+        Some(1),
+        "the confirmed window is focused"
+    );
+    assert!(
+        s.state.wm.outputs[0].workspace_list[0].window_list[0]
+            .geom
+            .is_fullscreen,
+        "the window that was fullscreen before the overview is fullscreen again"
+    );
+    s.check_consistent();
+}
