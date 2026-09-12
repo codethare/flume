@@ -77,6 +77,8 @@ const EVT_XKB_BINDING_PRESSED: u16 = 0;
 const REQ_XKB_DISABLE: u16 = 3;
 // both river_xkb_binding_v1 and river_pointer_binding_v1 have destroy = 0
 const REQ_BINDING_DESTROY: u16 = 0;
+// river_node_v1 requests (destroy=0, set_position=1, place_top=2)
+const REQ_NODE_PLACE_TOP: u16 = 2;
 // river_seat_v1 events (removed=0, wl_seat=1, …)
 const EVT_SEAT_REMOVED: u16 = 0;
 // river_seat_v1 events (…, wl_seat=1)
@@ -100,6 +102,7 @@ const REQ_SEAT_FOCUS_WINDOW: u16 = 1;
 const REQ_SEAT_CLEAR_FOCUS: u16 = 3;
 const REQ_SEAT_OP_END: u16 = 5;
 const REQ_SEAT_GET_POINTER_BINDING: u16 = 6;
+const REQ_SEAT_POINTER_WARP: u16 = 8;
 // river_seat_v1 events (…, op_delta=6, op_release=7)
 const EVT_SEAT_OP_DELTA: u16 = 6;
 const EVT_SEAT_OP_RELEASE: u16 = 7;

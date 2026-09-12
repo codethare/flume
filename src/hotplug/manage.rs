@@ -86,6 +86,9 @@ fn exclusive_layer_shell_focus_skips_focus_commands() {
     s.manage(&mut sv);
 
     s.state.wm.layer_shell_focus = crate::wm::LayerShellFocus::Exclusive;
+    // Focus gates only run from the Layout status; a bare state poke would
+    // make the "no focus commands" assertion vacuous.
+    s.state.wm.status = crate::types::Status::Layout;
     sv.clear_request_log();
     s.manage(&mut sv);
     assert_eq!(
@@ -126,6 +129,9 @@ fn locked_session_skips_focus_commands_and_restores_on_unlock() {
     s.send(&mut sv, wm.clone(), EVT_SESSION_LOCKED, vec![]);
     assert!(s.state.wm.session_locked);
     assert!(s.state.wm.lock_focus.is_some(), "focused window saved");
+    // The lock event does not schedule a manage; without the Layout status the
+    // gates would never run and "no focus commands" would prove nothing.
+    s.state.wm.status = crate::types::Status::Layout;
     sv.clear_request_log();
     s.manage(&mut sv);
     assert_eq!(
@@ -169,5 +175,53 @@ fn exit_status_calls_exit_session() {
         count_requests(&sv, &wm, REQ_WM_EXIT_SESSION),
         1,
         "Exit must call river_window_manager_v1.exit_session"
+    );
+}
+
+/// A non-exclusive layer-shell surface (a bar) keeps keyboard focus until a
+/// window wants it: the WM must not clear focus while it holds it, but must
+/// still hand focus to a window.
+#[test]
+fn nonexclusive_layer_shell_focus_is_not_cleared() {
+    let (mut s, mut sv) = build();
+    let seat = s.add_seat(&mut sv);
+    s.manage(&mut sv);
+    s.add_output(&mut sv, "A", (0, 0), (1920, 1080));
+    s.manage(&mut sv);
+    s.add_window(&mut sv);
+    s.manage(&mut sv);
+    assert!(
+        s.state.wm.last_focused_window.is_some(),
+        "a window was focused"
+    );
+
+    // The window goes away as a focus candidate (e.g. it was closed and the
+    // index cleared): with a non-exclusive layer surface the bar keeps focus.
+    s.state.wm.outputs[0].workspace_list[0].focused_window_idx = None;
+    s.state.wm.layer_shell_focus = crate::wm::LayerShellFocus::NonExclusive;
+    // Poking state does not schedule a manage; the focus gates only run from
+    // the Layout status.
+    s.state.wm.status = crate::types::Status::Layout;
+    sv.clear_request_log();
+    s.manage(&mut sv);
+    assert_eq!(
+        count_requests(&sv, &seat, REQ_SEAT_CLEAR_FOCUS),
+        0,
+        "focus must stay with the non-exclusive layer surface"
+    );
+
+    // With no layer surface holding focus the WM clears it as before: the
+    // cache must still name the old window for the change to be visible.
+    let previously_focused = s.state.wm.outputs[0].workspace_list[0].window_list[0]
+        .river_window
+        .clone();
+    s.state.wm.layer_shell_focus = crate::wm::LayerShellFocus::None;
+    s.state.wm.last_focused_window = Some(previously_focused);
+    s.state.wm.status = crate::types::Status::Layout;
+    sv.clear_request_log();
+    s.manage(&mut sv);
+    assert!(
+        count_requests(&sv, &seat, REQ_SEAT_CLEAR_FOCUS) >= 1,
+        "clearing focus is the default outside non-exclusive layer focus"
     );
 }

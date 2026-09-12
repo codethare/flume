@@ -206,3 +206,48 @@ fn removed_seat_destroys_its_bindings_and_a_new_seat_gets_new_ones() {
     assert!(s.state.xkb_bindings.len() > 50);
     s.check_consistent();
 }
+
+/// Focusing another output warps the pointer to its centre (rill-ed/niri
+/// behaviour), so the cursor does not stay on a display the user just left.
+#[test]
+fn focusing_another_output_warps_the_pointer_to_its_centre() {
+    let (mut s, mut sv) = build();
+    let seat = s.add_seat(&mut sv);
+    s.manage(&mut sv);
+    s.add_output(&mut sv, "A", (0, 0), (1920, 1080));
+    s.manage(&mut sv);
+    s.add_window(&mut sv);
+    s.manage(&mut sv);
+    s.add_output(&mut sv, "B", (1920, 0), (1280, 720));
+    s.manage(&mut sv);
+    assert_eq!(s.state.wm.focused_output_idx, Some(1), "focus starts on B");
+
+    sv.clear_request_log();
+    crate::keybinding::dispatch_action(
+        &mut s.state,
+        &crate::actions::KeybindingAction::FocusOutputLeft,
+    );
+    s.manage(&mut sv);
+    assert_eq!(s.state.wm.focused_output_idx, Some(0));
+    let warps: Vec<String> = sv
+        .requests_for(&seat)
+        .into_iter()
+        .filter(|(_, op, _)| *op == REQ_SEAT_POINTER_WARP)
+        .map(|(_, _, args)| args)
+        .collect();
+    assert_eq!(
+        warps,
+        vec!["i960,i540".to_string()],
+        "one warp to the centre of output A"
+    );
+
+    // No further warp while the focus stays put.
+    sv.clear_request_log();
+    s.manage(&mut sv);
+    assert!(
+        !sv.requests_for(&seat)
+            .iter()
+            .any(|(_, op, _)| *op == REQ_SEAT_POINTER_WARP),
+        "the warp must not repeat every manage cycle"
+    );
+}

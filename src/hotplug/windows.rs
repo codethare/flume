@@ -268,3 +268,61 @@ fn floating_window_fullscreen_fills_the_output() {
     );
     s.check_consistent();
 }
+
+/// floating windows are raised above tiled ones: apply_focus_and_borders
+/// raises the focused window, then raise_floating_windows raises every float,
+/// so the last place_top must belong to the floating window.
+#[test]
+fn floating_windows_raise_above_tiled_ones() {
+    let (mut s, mut sv) = build();
+    s.add_seat(&mut sv);
+    s.manage(&mut sv);
+    s.add_output(&mut sv, "A", (0, 0), (1920, 1080));
+    s.manage(&mut sv);
+    s.add_window(&mut sv); // window 0, node 0
+    s.manage(&mut sv);
+    s.add_window(&mut sv); // window 1, node 1, focused
+    s.manage(&mut sv);
+
+    // Float the focused window 1, then focus the tiled window 0.
+    crate::keybinding::dispatch_action(
+        &mut s.state,
+        &crate::actions::KeybindingAction::ToggleWorkspaceFloating,
+    );
+    s.manage(&mut sv);
+    crate::keybinding::dispatch_action(
+        &mut s.state,
+        &crate::actions::KeybindingAction::FocusWindowLeft,
+    );
+    s.manage(&mut sv);
+
+    let nodes = children_with_interface(&sv, "river_node_v1");
+    assert_eq!(nodes.len(), 2, "one node per window");
+    assert!(
+        !s.state.wm.outputs[0].workspace_list[0].window_list[0]
+            .geom
+            .is_floating,
+        "window 0 is the tiled one"
+    );
+    assert!(
+        s.state.wm.outputs[0].workspace_list[0].window_list[1]
+            .geom
+            .is_floating,
+        "window 1 is the floating one"
+    );
+
+    let raised: Vec<ObjectId> = sv
+        .request_log
+        .lock()
+        .unwrap()
+        .iter()
+        .filter(|(_, op, _)| *op == REQ_NODE_PLACE_TOP)
+        .filter(|(object, _, _)| nodes.contains(object))
+        .map(|(object, _, _)| object.clone())
+        .collect();
+    assert_eq!(
+        raised.last(),
+        Some(&nodes[1]),
+        "the floating window must be the last one raised, got {raised:?}"
+    );
+}

@@ -106,3 +106,15 @@ fn a_late_app_id_does_not_apply_the_rule() {
     s.manage(&mut sv);
     assert!(!only_window(&s).geom.is_floating);
 }
+
+/// A title change after the window is mapped does not re-evaluate rules
+/// (titles of live windows are not tracked at all).
+#[test]
+fn a_late_title_does_not_apply_the_rule() {
+    let (mut s, mut sv) = scene(vec![rule(None, Some("*Picture-in-Picture*"), true)]);
+    let win = s.add_window(&mut sv); // mapped with no title
+    s.manage(&mut sv);
+    send_str(&mut s, &mut sv, &win, EVT_WIN_TITLE, "Picture-in-Picture");
+    s.manage(&mut sv);
+    assert!(!only_window(&s).geom.is_floating);
+}
