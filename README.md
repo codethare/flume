@@ -32,6 +32,9 @@ Dependencies: Rust (stable), `libxkbcommon`, `wayland`, `wayland-protocols` (run
 cargo build --release
 ```
 
+Contributors: [docs/architecture.md](docs/architecture.md) covers the manage
+cycle, the layout pipeline and the test harness.
+
 ## Running
 
 ```
