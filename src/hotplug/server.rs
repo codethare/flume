@@ -26,11 +26,11 @@ fn fmt_args<F>(args: &[Argument<ObjectId, F>]) -> String {
         .join(",")
 }
 
-/// Generic no-op server object: tolerates every request flume makes, and
+/// Generic no-op server object: tolerates every request tailrace makes, and
 /// returns fresh `Obj` data for children it creates via `new_id` requests.
 /// Records every `new_id` child it spawns so tests can send events on them
 /// (e.g. `non_exclusive_area` on layer-shell outputs), and every request the
-/// client makes so tests can inspect what flume sends for a window.
+/// client makes so tests can inspect what tailrace sends for a window.
 #[derive(Default)]
 struct Obj {
     children: Option<Arc<Mutex<Vec<ObjectId>>>>,
@@ -152,7 +152,7 @@ impl MiniServer {
         let requests = Arc::new(Mutex::new(Vec::new()));
         // Globals advertised to every registry the client creates, in bind order.
         // The wm and xkb versions must match the VERSION constants in app.rs:
-        // if flume's floor moves past them, the client exits and the tests fail.
+        // if tailrace's floor moves past them, the client exits and the tests fail.
         let globals: [(
             &'static wayland_backend::protocol::Interface,
             u32,

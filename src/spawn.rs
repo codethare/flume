@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: © 2026 Julian Andrews
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-//! Spawn a program detached from flume's session, process group, and
+//! Spawn a program detached from tailrace's session, process group, and
 //! controlling terminal (setsid + double fork), matching rill-ed spawn.zig
 //! and the behavior of kwm/dwl/etc.
 
@@ -62,7 +62,7 @@ pub fn spawn_detached(argv: &[String]) -> Result<(), String> {
         if exec_search(&argv_c, &envp).is_err() {
             // The parent has already returned, so a failed exec is otherwise
             // invisible (rill-ed prints here too).
-            child_warn("flume: failed to run ");
+            child_warn("tailrace: failed to run ");
             child_warn(&argv[0]);
             child_warn("\n");
         }
@@ -142,12 +142,12 @@ mod tests {
         let mut fds = [0i32; 2];
         // SAFETY: plain pipe(2) with a valid array.
         assert_eq!(unsafe { libc::pipe(fds.as_mut_ptr()) }, 0);
-        super::child_warn_to(fds[1], "flume: x");
-        let mut buf = [0u8; 8];
+        super::child_warn_to(fds[1], "tailrace: x");
+        let mut buf = [0u8; 11];
         // SAFETY: reading from the pipe we just wrote to.
         let n = unsafe { libc::read(fds[0], buf.as_mut_ptr().cast(), buf.len()) };
-        assert_eq!(n, 8);
-        assert_eq!(&buf, b"flume: x");
+        assert_eq!(n, 11);
+        assert_eq!(&buf, b"tailrace: x");
         // SAFETY: closing both ends.
         unsafe {
             libc::close(fds[0]);

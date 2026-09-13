@@ -3,7 +3,7 @@ SPDX-FileCopyrightText: © 2026 Julian Andrews
 SPDX-License-Identifier: AGPL-3.0-or-later
 -->
 
-# flume
+# tailrace
 
 Tiny scrolling window manager for [river](https://isaacfreund.com/software/river/),
 implemented in Rust against the
@@ -38,21 +38,21 @@ cycle, the layout pipeline and the test harness.
 ## Running
 
 ```
-river -c ./target/release/flume
+river -c ./target/release/tailrace
 ```
 
-Requires river **0.4.6 or newer** (flume binds `river_window_manager_v1` v5 and
+Requires river **0.4.6 or newer** (tailrace binds `river_window_manager_v1` v5 and
 `river_xkb_bindings_v1` v3).
 
-flume itself takes `-c/--config <path>` to read a specific config file,
+tailrace itself takes `-c/--config <path>` to read a specific config file,
 `--help` and `--version`.
 
 ## Configuration
 
 Config is searched at, in order:
 
-1. `$XDG_CONFIG_HOME/flume/config.toml`
-2. `$HOME/.config/flume/config.toml`
+1. `$XDG_CONFIG_HOME/tailrace/config.toml`
+2. `$HOME/.config/tailrace/config.toml`
 
 If no file is found, the built-in defaults (identical to rill-ed's defaults,
 minus animations) are used. A `[keybindings]` or `[[pointer_bindings]]` section

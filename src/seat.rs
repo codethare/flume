@@ -188,7 +188,7 @@ pub fn setup_pointer_bindings(state: &mut AppData) {
     for binding in &state.wm.config.pointer_bindings {
         let Ok(mods) = crate::keybinding::parse_modifiers(&binding.modifiers) else {
             eprintln!(
-                "flume: invalid modifiers {:?} in pointer binding",
+                "tailrace: invalid modifiers {:?} in pointer binding",
                 binding.modifiers
             );
             continue;

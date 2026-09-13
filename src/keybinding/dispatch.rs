@@ -15,7 +15,7 @@ pub fn dispatch_action(state: &mut crate::app::AppData, action: &KeybindingActio
         // Early-return actions without layout updates.
         A::Spawn(argv) => {
             if let Err(e) = crate::spawn::spawn_detached(argv) {
-                eprintln!("flume: cannot spawn {argv:?}: {e}");
+                eprintln!("tailrace: cannot spawn {argv:?}: {e}");
             }
             return;
         }

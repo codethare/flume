@@ -79,7 +79,7 @@ fn scene() -> (Session, MiniServer) {
     s.manage(&mut sv);
     s.add_window(&mut sv);
     s.manage(&mut sv);
-    s.state.config_path = Some(std::path::PathBuf::from("/nonexistent/flume.toml"));
+    s.state.config_path = Some(std::path::PathBuf::from("/nonexistent/tailrace.toml"));
     s.check_consistent();
     (s, sv)
 }

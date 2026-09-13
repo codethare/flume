@@ -215,7 +215,7 @@ impl Session {
 
     /// Create a window object without announcing dimensions: it stays
     /// pending until `map_window`, which is where river sends app_id/title
-    /// (before dimensions), and where flume evaluates window rules.
+    /// (before dimensions), and where tailrace evaluates window rules.
     pub(super) fn add_pending_window(&mut self, server: &mut MiniServer) -> ObjectId {
         let win = server.create_object(&RIVER_WINDOW_V1_INTERFACE);
         self.send(

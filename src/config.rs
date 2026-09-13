@@ -7,14 +7,14 @@ use std::path::{Path, PathBuf};
 use crate::keybinding::{default_keybindings, default_pointer_bindings};
 use crate::types::Config;
 
-/// Candidate config paths, in order: `$XDG_CONFIG_HOME/flume/config.toml`,
-/// `$HOME/.config/flume/config.toml`.
+/// Candidate config paths, in order: `$XDG_CONFIG_HOME/tailrace/config.toml`,
+/// `$HOME/.config/tailrace/config.toml`.
 fn config_paths() -> Vec<PathBuf> {
     let mut paths = Vec::new();
     if let Some(xdg) = std::env::var_os("XDG_CONFIG_HOME")
         && !xdg.is_empty()
     {
-        paths.push(PathBuf::from(xdg).join("flume").join("config.toml"));
+        paths.push(PathBuf::from(xdg).join("tailrace").join("config.toml"));
     }
     if let Some(home) = std::env::var_os("HOME")
         && !home.is_empty()
@@ -22,7 +22,7 @@ fn config_paths() -> Vec<PathBuf> {
         paths.push(
             PathBuf::from(home)
                 .join(".config")
-                .join("flume")
+                .join("tailrace")
                 .join("config.toml"),
         );
     }
@@ -158,7 +158,7 @@ mod tests {
     /// coverage (only the argument parser and `parse` were tested).
     #[test]
     fn explicit_path_loads_and_reloads() {
-        let dir = std::env::temp_dir().join(format!("flume-config-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("tailrace-config-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("config.toml");
 

@@ -27,13 +27,13 @@ use crate::app::AppData;
 use crate::wm::WindowManager;
 
 const USAGE: &str = "\
-flume - tiny scrolling window manager for river
+tailrace - tiny scrolling window manager for river
 
-usage: flume [-c <path>]
+usage: tailrace [-c <path>]
 
 options:
   -c, --config <path>  read this file instead of searching
-                       $XDG_CONFIG_HOME/flume/config.toml and ~/.config/flume/config.toml
+                       $XDG_CONFIG_HOME/tailrace/config.toml and ~/.config/tailrace/config.toml
   -h, --help           print this help and exit
   -V, --version        print the version and exit
 ";
@@ -62,7 +62,7 @@ fn parse_args_from<I: Iterator<Item = String>>(mut args: I) -> Result<Option<Arg
                 return Ok(None);
             }
             "-V" | "--version" => {
-                println!("flume {}", env!("CARGO_PKG_VERSION"));
+                println!("tailrace {}", env!("CARGO_PKG_VERSION"));
                 return Ok(None);
             }
             other => return Err(format!("unknown argument '{other}'")),
@@ -76,7 +76,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         Ok(Some(args)) => args,
         Ok(None) => return Ok(()),
         Err(message) => {
-            eprintln!("flume: {message}\n{USAGE}");
+            eprintln!("tailrace: {message}\n{USAGE}");
             std::process::exit(2);
         }
     };
@@ -94,7 +94,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         };
         libc::sigaction(libc::SIGCHLD, &sa, std::ptr::null_mut());
     }
-    // Die when our parent (typically river -c flume) dies, so we don't get
+    // Die when our parent (typically river -c tailrace) dies, so we don't get
     // reparented to init and outlive the session if river crashes or is
     // killed.
     unsafe {
@@ -131,7 +131,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Roundtrip to process the registry globals and bind river interfaces.
     event_queue.roundtrip(&mut state)?;
-    // Required: without them flume cannot manage windows or bind keys. Exit
+    // Required: without them tailrace cannot manage windows or bind keys. Exit
     // non-zero so a failed session start is visible to whoever launched it.
     if state.river_wm.is_none() {
         return Err("river_window_manager_v1 global not found".into());
@@ -142,15 +142,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     if state.river_layer_shell.is_none() {
         // Optional (rill-ed behaves the same): without it layer-shell focus is
         // not tracked, so exclusive keyboard focus from a bar is not honored.
-        eprintln!("flume: river_layer_shell_v1 missing, layer-shell focus tracking disabled");
+        eprintln!("tailrace: river_layer_shell_v1 missing, layer-shell focus tracking disabled");
     }
 
     // Don't pass WAYLAND_DEBUG on to children; the added noise makes
-    // debugging spawned programs impractical (flume itself may be debugged
+    // debugging spawned programs impractical (tailrace itself may be debugged
     // with it).
     for command in state.wm.config.spawn_at_startup.clone() {
         if let Err(e) = spawn::spawn_detached(&command) {
-            eprintln!("flume: cannot run spawn_at_startup {command:?}: {e}");
+            eprintln!("tailrace: cannot run spawn_at_startup {command:?}: {e}");
         }
     }
 

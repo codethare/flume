@@ -5,8 +5,8 @@ SPDX-License-Identifier: AGPL-3.0-or-later
 
 # Architecture
 
-flume is a window manager *client*: river owns input, rendering and the
-protocol, and flume decides where windows go and which one has focus. This
+tailrace is a window manager *client*: river owns input, rendering and the
+protocol, and tailrace decides where windows go and which one has focus. This
 document is the map for changing it; `README.md` covers user-facing behaviour.
 
 ## Where things live
@@ -25,7 +25,7 @@ document is the map for changing it; `README.md` covers user-facing behaviour.
 
 ## The manage cycle
 
-river drives everything: it sends events, then a `manage_start`, and flume
+river drives everything: it sends events, then a `manage_start`, and tailrace
 answers with requests and finally `manage_finish`. `app.rs::manage()` runs the
 state machine once per sequence:
 
@@ -85,7 +85,7 @@ log. Helpers: `add_output`, `add_pending_window` + `map_window`,
 
 Limits: there is no compositor, so requests are recorded rather than executed,
 nothing is rendered, and protocol errors only surface as panics inside the
-backend. Passing tests prove what flume *asks for*, not what river does.
+backend. Passing tests prove what tailrace *asks for*, not what river does.
 
 ## Traps worth knowing
 
@@ -105,7 +105,7 @@ backend. Passing tests prove what flume *asks for*, not what river does.
   bindings would never be created.
 - **rill-ed is the reference implementation.** When behaviour looks wrong,
   compare with `src/` in rill-ed (`animation.zig` ↔ `snap_to_finish`,
-  `layout.zig` ↔ `layout/`); two bugs in flume were single dropped lines from
+  `layout.zig` ↔ `layout/`); two bugs in tailrace were single dropped lines from
   it, and one deliberate divergence (fullscreen floats) is documented in the
   code.
 - **Protocol updates** are a `protocol/update.sh <ref>` plus a bind version

@@ -2,13 +2,13 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
 [package]
-name = "flume"
+name = "tailrace"
 description = "Tiny scrolling window manager for river"
 license = "AGPL-3.0-or-later"
 version = "0.1.0"
 edition = "2024"
 rust-version = "1.88"
-repository = "https://github.com/codethare/flume"
+repository = "https://github.com/codethare/tailrace"
 
 [dependencies]
 bitflags = "2.11.0"

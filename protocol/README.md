@@ -21,7 +21,7 @@ The vendored state matches the river release
 | `river-xkb-bindings-v1.xml` | v3 | none |
 | `river-layer-shell-v1.xml` | v1 | none |
 
-flume binds `river_window_manager_v1` at v5 and `river_xkb_bindings_v1` at v3
+tailrace binds `river_window_manager_v1` at v5 and `river_xkb_bindings_v1` at v3
 (`src/app.rs`), so the running river must be **0.4.6 or newer**. Two API
 additions come with them and are vendored but deliberately unused for now:
 `river_window_v1`/`river_output_v1.capture_sessions` (counts of active
